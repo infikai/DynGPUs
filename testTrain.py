@@ -253,7 +253,7 @@ except KeyboardInterrupt:
     }
     if scheduler is not None:
         checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
-    torch.save(checkpoint_data, CHECKPOINT_PATH + "_interrupt")
+    torch.save(checkpoint_data, CHECKPOINT_PATH) # + "_interrupt")
 
 except Exception as e:
     print(f"An error occurred during training: {e}")
