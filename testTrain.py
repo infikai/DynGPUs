@@ -245,15 +245,15 @@ except KeyboardInterrupt:
     # from the *last completed epoch* or be careful about inconsistent state.
     print("Exiting.")
     # Optionally save one last time
-    # checkpoint_data = {
-    #     'epoch': epoch, # This might be a partially completed epoch
-    #     'model_state_dict': model.state_dict(),
-    #     'optimizer_state_dict': optimizer.state_dict(),
-    #     'best_val_accuracy': best_val_accuracy,
-    # }
-    # if scheduler is not None:
-    #     checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
-    # torch.save(checkpoint_data, CHECKPOINT_PATH + "_interrupt")
+    checkpoint_data = {
+        'epoch': epoch, # This might be a partially completed epoch
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'best_val_accuracy': best_val_accuracy,
+    }
+    if scheduler is not None:
+        checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
+    torch.save(checkpoint_data, CHECKPOINT_PATH + "_interrupt")
 
 except Exception as e:
     print(f"An error occurred during training: {e}")
