@@ -8,7 +8,7 @@ import os
 import time # For timing epochs
 
 # --- Configuration ---
-DATA_DIR = '/path/to/your/imagenet' # IMPORTANT: Set this to your ImageNet directory
+DATA_DIR = '/mydata/Data/imagenet' # IMPORTANT: Set this to your ImageNet directory
 MODEL_NAME = 'resnet50'
 NUM_CLASSES = 1000 # ImageNet has 1000 classes
 BATCH_SIZE = 64  # Adjust based on your GPU memory
