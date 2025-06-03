@@ -116,7 +116,7 @@ best_val_accuracy = 0.0 # Track best validation accuracy
 if os.path.exists(CHECKPOINT_PATH):
     print(f"Loading checkpoint from '{CHECKPOINT_PATH}'")
     try:
-        checkpoint = torch.load(CHECKPOINT_PATH, map_location=device) # Load to current device
+        checkpoint = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=True) # Load to current device
         
         # Adjust for DataParallel: remove 'module.' prefix if saved with it and loading without it, or vice-versa
         model_state_dict = checkpoint['model_state_dict']
