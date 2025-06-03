@@ -117,9 +117,9 @@ def train_one_epoch(epoch):
     epoch_corrects = 0
     total_samples = 0
     epoch_start_time = time.time()
+    batch_start_time = time.time()
 
     for batch_idx, (inputs, labels) in enumerate(train_loader):
-        batch_start_time = time.time()
         inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True) # non_blocking for pin_memory
 
         optimizer.zero_grad(set_to_none=True) # set_to_none can improve performance slightly
@@ -132,9 +132,10 @@ def train_one_epoch(epoch):
         epoch_loss += loss.item() * inputs.size(0)
         epoch_corrects += torch.sum(preds == labels.data)
         total_samples += inputs.size(0)
-        batch_time = time.time() - batch_start_time
 
         if batch_idx % PRINT_FREQ == 0 or batch_idx == len(train_loader) -1 :
+            batch_time = time.time() - batch_start_time
+            batch_start_time = time.time()
             current_loss = loss.item()
             current_acc = torch.sum(preds == labels.data).double() / inputs.size(0)
             print(f"Epoch [{epoch+1}/{EPOCHS}] Batch [{batch_idx+1}/{len(train_loader)}] "
