@@ -11,7 +11,7 @@ import time # For timing epochs and checkpoints
 DATA_DIR = '/mydata/Data/imagenet' # IMPORTANT: Set this to your ImageNet directory
 MODEL_NAME = 'resnet50'
 NUM_CLASSES = 1000 # ImageNet has 1000 classes
-BATCH_SIZE = 256  # Adjust based on your GPU memory
+BATCH_SIZE = 64  # Adjust based on your GPU memory
 NUM_WORKERS = 10  # Adjust based on your CPU cores
 LEARNING_RATE = 0.001 # Initial learning rate
 MOMENTUM = 0.9
@@ -204,9 +204,12 @@ try:
             print(f"New best validation accuracy: {best_val_accuracy:.4f}.")
         
         if (epoch + 1) % CHECKPOINT_INTERVAL == 0 or is_best:
+            if not is_best:
+                 print(f"Saving checkpoint at epoch {epoch+1}...")
+            
             checkpoint_data = {
                 'epoch': epoch,
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': model.state_dict(), # Use model.module.state_dict() if using DataParallel and want to save without the 'module.' prefix
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_val_accuracy': best_val_accuracy,
                 'current_val_accuracy': val_acc,
@@ -215,22 +218,10 @@ try:
             if scheduler is not None:
                 checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
             
-            # >>> Start timing checkpoint save <<<
-            save_start_time = time.time()
+            torch.save(checkpoint_data, CHECKPOINT_PATH)
             if is_best:
-                print(f"Saving best model checkpoint (Epoch {epoch+1})...")
-                torch.save(checkpoint_data, f"{MODEL_NAME}_imagenet_best.pth")
-            
-            # Always save the regular checkpoint if interval is met or it's best
-            # (could be redundant if is_best is true and interval is 1, but safe)
-            if (epoch + 1) % CHECKPOINT_INTERVAL == 0 :
-                 print(f"Saving checkpoint at epoch {epoch+1}...")
-                 torch.save(checkpoint_data, CHECKPOINT_PATH)
+                torch.save(checkpoint_data, f"{MODEL_NAME}_imagenet_best.pth") # Save best model separately
 
-            save_end_time = time.time()
-            checkpoint_save_duration = save_end_time - save_start_time
-            print(f"Checkpoint saved. Time taken: {checkpoint_save_duration:.2f} seconds.")
-            # >>> End timing checkpoint save <<<
 
         epoch_overall_duration = time.time() - epoch_overall_start_time
         print(f"Total time for Epoch {epoch+1}: {epoch_overall_duration:.2f}s")
