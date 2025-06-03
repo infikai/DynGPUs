@@ -11,7 +11,7 @@ import time # For timing epochs and checkpoints
 DATA_DIR = '/mydata/Data/imagenet' # IMPORTANT: Set this to your ImageNet directory
 MODEL_NAME = 'resnet50'
 NUM_CLASSES = 1000 # ImageNet has 1000 classes
-BATCH_SIZE = 256  # Adjust based on your GPU memory
+BATCH_SIZE = 128  # Adjust based on your GPU memory
 NUM_WORKERS = 32  # Adjust based on your CPU cores
 LEARNING_RATE = 0.001 # Initial learning rate
 MOMENTUM = 0.9
@@ -229,6 +229,20 @@ except KeyboardInterrupt:
     # If you want to save on interrupt, ensure it's handled carefully
     # to avoid saving incomplete epoch data if the interrupt happens mid-epoch.
     print("Exiting.")
+    # Optionally save one last time
+    save_start_time = time.time()
+    checkpoint_data = {
+        'epoch': epoch, # This might be a partially completed epoch
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'best_val_accuracy': best_val_accuracy,
+    }
+    if scheduler is not None:
+        checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
+    torch.save(checkpoint_data, CHECKPOINT_PATH)
+    save_end_time = time.time()
+    checkpoint_save_duration = save_end_time - save_start_time
+    print(f"Checkpoint saved. Time taken: {checkpoint_save_duration:.2f} seconds.")
 
 except Exception as e:
     print(f"An error occurred during training: {e}")

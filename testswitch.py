@@ -3,6 +3,17 @@ import os
 import signal
 import multiprocessing
 import threading
+# Train
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
+import torchvision.models as models
+import os
+import time # For timing epochs
+# Infer
+
 
 # --- User-defined functions (placeholders) ---
 def train():
