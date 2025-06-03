@@ -61,7 +61,7 @@ try:
     )
 
     val_dataset = datasets.ImageFolder(
-        os.path.join(DATA_DIR, 'val'), # Or 'validation' or your validation set folder name
+        os.path.join(DATA_DIR, 'val'),
         val_transform
     )
     val_loader = torch.utils.data.DataLoader(
