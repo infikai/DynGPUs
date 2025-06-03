@@ -86,7 +86,9 @@ def load_checkpoint(model, optimizer, filename="latest_checkpoint.pth"):
     if os.path.isfile(filepath):
         print(f"[TRAIN PID {os.getpid()}] Loading checkpoint '{filepath}'")
         try:
-            checkpoint = torch.load(filepath, map_location=lambda storage, loc: storage) # Handles CPU/GPU load
+            # Load checkpoint onto the same device it was saved from, or CPU if GPU not available
+            # This lambda function ensures that if a model was saved on GPU, it can be loaded on CPU.
+            checkpoint = torch.load(filepath, map_location=lambda storage, loc: storage) 
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             start_epoch = checkpoint['epoch'] + 1 # Start from the next epoch
@@ -139,17 +141,21 @@ def train():
     model.train() 
 
     dummy_dataset = DummyImageDataset(num_samples=1280) 
-    train_loader = DataLoader(dummy_dataset, batch_size=32, shuffle=True, num_workers=2 if device.type == 'cuda' else 0) 
+    # Set num_workers for DataLoader. If 0, data loading happens in the main process.
+    # If > 0, it uses subprocesses. This requires the parent process (train_process) to be non-daemonic.
+    num_dataloader_workers = 2 if device.type == 'cuda' else 0 
+    print(f"[TRAIN PID {os.getpid()}] DataLoader using num_workers={num_dataloader_workers}")
+    train_loader = DataLoader(dummy_dataset, batch_size=32, shuffle=True, num_workers=num_dataloader_workers) 
 
     max_epochs = 100 
     running = True 
     current_epoch_loss = 0.0
     current_epoch_batches = 0
-    epoch_for_interrupt_save = start_epoch # Initialize with start_epoch
+    epoch_for_interrupt_save = start_epoch 
 
     try:
         for epoch in range(start_epoch, max_epochs):
-            epoch_for_interrupt_save = epoch # Keep track of current epoch for interrupt save
+            epoch_for_interrupt_save = epoch 
             if not running: break
             print(f"[TRAIN PID {os.getpid()}] Epoch {epoch+1}/{max_epochs}")
             epoch_loss_aggregator = 0.0
@@ -291,10 +297,9 @@ def manage_processes():
                 print(f"MONITOR: Load ({Load}) > Max_Load ({Max_Load}). Attempting to shut down training (PID: {train_process.pid}).")
                 try:
                     os.kill(train_process.pid, signal.SIGINT) 
-                    # Increased timeout for checkpoint saving
-                    train_process.join(timeout=300) 
+                    train_process.join(timeout=30) 
                     if train_process.is_alive():
-                        print(f"MONITOR: Training (PID: {train_process.pid}) did not stop after SIGINT (300s). Forcing kill.")
+                        print(f"MONITOR: Training (PID: {train_process.pid}) did not stop after SIGINT (30s). Forcing kill.")
                         train_process.kill()  
                         train_process.join(timeout=5)
                 except ProcessLookupError: 
@@ -315,7 +320,8 @@ def manage_processes():
                     serving_process.close()
                     serving_process = None 
                 print(f"MONITOR: Load ({Load}) > Max_Load ({Max_Load}). Starting serving...")
-                serving_process = multiprocessing.Process(target=serving_worker_entry, daemon=True)
+                # Changed daemon=True to daemon=False
+                serving_process = multiprocessing.Process(target=serving_worker_entry, daemon=False)
                 serving_process.start()
                 print(f"MONITOR: Serving process started (PID: {serving_process.pid}).")
 
@@ -347,11 +353,16 @@ def manage_processes():
                     train_process.close()
                     train_process = None
                 print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Starting training...")
-                train_process = multiprocessing.Process(target=train_worker_entry, daemon=True)
+                # Changed daemon=True to daemon=False
+                train_process = multiprocessing.Process(target=train_worker_entry, daemon=False)
                 train_process.start()
                 print(f"MONITOR: Training process started (PID: {train_process.pid}).")
 
 def monitor_thread_worker():
+    """
+    Thread worker function to periodically call manage_processes.
+    This thread itself IS daemonic, so it won't block program exit if the main thread finishes.
+    """
     print("MONITOR: Monitor thread started. Will check load every 2 seconds.")
     while not stop_monitor_event.is_set():
         manage_processes()
@@ -362,12 +373,14 @@ def cleanup_all_processes():
     print("MAIN: Initiating cleanup of all child processes...")
     global train_process, serving_process
     
+    # The monitor thread is daemonic and should stop when stop_monitor_event is set
+    # and the main thread exits. We primarily focus on train_process and serving_process here.
+
     with process_management_lock: 
         if train_process and train_process.is_alive():
             print(f"MAIN: Cleaning up training process (PID: {train_process.pid})...")
             try:
                 os.kill(train_process.pid, signal.SIGINT) 
-                # Increased timeout for checkpoint saving during final cleanup
                 train_process.join(timeout=30) 
                 if train_process.is_alive(): 
                     print(f"MAIN: Training (PID: {train_process.pid}) still alive after SIGINT (30s). Killing.")
@@ -397,6 +410,9 @@ def cleanup_all_processes():
 
 # --- Main execution ---
 if __name__ == "__main__":
+    # Important for scripts using multiprocessing, especially if they might be frozen
+    # or run on Windows where the default start method is 'spawn'.
+    multiprocessing.set_start_method('spawn', force=True) # Good practice for cross-platform compatibility
     multiprocessing.freeze_support() 
 
     print(f"MAIN: Program started. Default Max_Load is {Max_Load}. Initial Load is {Load}.")
@@ -408,6 +424,8 @@ if __name__ == "__main__":
     print("MAIN: Enter an integer value for 'Load' to change system behavior.")
     print("MAIN: Type 'q' or 'quit' to exit.")
 
+    # The monitor thread can remain daemonic as its job is to react to the main program's state
+    # and it shouldn't block exit.
     monitor = threading.Thread(target=monitor_thread_worker, daemon=True)
     monitor.start()
 
@@ -433,14 +451,18 @@ if __name__ == "__main__":
         print("MAIN: KeyboardInterrupt received in main loop. Shutting down...")
     finally:
         print("MAIN: Starting final shutdown sequence...")
-        stop_monitor_event.set() 
+        stop_monitor_event.set() # Signal monitor thread to stop
 
-        if monitor.is_alive():
+        if monitor.is_alive(): # Wait for monitor thread to finish its current cycle
             print("MAIN: Waiting for monitor thread to finish...")
-            monitor.join(timeout=5) 
+            monitor.join(timeout=5) # Give it a few seconds
             if monitor.is_alive():
-                print("MAIN: Monitor thread did not stop in time.")
+                print("MAIN: Monitor thread did not stop in time (this is okay as it's daemonic).")
         
-        cleanup_all_processes() 
+        cleanup_all_processes() # Clean up non-daemonic train/serving processes
+        
+        # Non-daemonic child processes (train_process, serving_process) must exit
+        # before the main program can exit. The cleanup_all_processes tries to ensure this.
+        # If they were still alive and non-daemonic, the script would hang here.
         
         print("MAIN: Program terminated.")
