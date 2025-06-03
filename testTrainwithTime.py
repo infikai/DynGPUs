@@ -48,7 +48,7 @@ try:
     )
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=NUM_WORKERS, pin_memory=True, prefetch_factor=2 if NUM_WORKERS > 0 else None # Added prefetch_factor
+        num_workers=NUM_WORKERS, pin_memory=True
     )
 
     val_dataset = datasets.ImageFolder(
@@ -57,7 +57,7 @@ try:
     )
     val_loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=BATCH_SIZE, shuffle=False,
-        num_workers=NUM_WORKERS, pin_memory=True, prefetch_factor=2 if NUM_WORKERS > 0 else None # Added prefetch_factor
+        num_workers=NUM_WORKERS, pin_memory=True
     )
     print(f"Loaded training data: {len(train_dataset)} images")
     print(f"Loaded validation data: {len(val_dataset)} images")
@@ -71,8 +71,16 @@ except Exception as e:
 
 # --- Model Definition ---
 print(f"Loading model: {MODEL_NAME}")
-model = models.resnet50(weights=None, progress=True) # Training from scratch
+# Load ResNet50. You can choose pretrained=True if you want to fine-tune
+# or pretrained=False to train from scratch.
+model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1 if False else None, progress=True) # Set to True to use pretrained weights
+
+# If training from scratch or adapting to a different number of classes (not needed for standard ImageNet)
+# num_ftrs = model.fc.in_features
+# model.fc = nn.Linear(num_ftrs, NUM_CLASSES)
+
 model = model.to(device)
+
 if torch.cuda.device_count() > 1:
     print(f"Using {torch.cuda.device_count()} GPUs!")
     model = nn.DataParallel(model)
@@ -82,7 +90,11 @@ optimizer = optim.SGD(model.parameters(), LEARNING_RATE,
                       momentum=MOMENTUM,
                       weight_decay=WEIGHT_DECAY)
 criterion = nn.CrossEntropyLoss().to(device)
+
+# Learning rate scheduler (optional, but common for ImageNet)
+# Example: StepLR, reduce learning rate by a factor of 10 every 30 epochs
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+
 
 # --- Load Checkpoint (if exists) ---
 start_epoch = 0
