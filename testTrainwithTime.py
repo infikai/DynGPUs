@@ -11,8 +11,8 @@ import time # For timing epochs and checkpoints
 DATA_DIR = '/mydata/Data/imagenet' # IMPORTANT: Set this to your ImageNet directory
 MODEL_NAME = 'resnet50'
 NUM_CLASSES = 1000 # ImageNet has 1000 classes
-BATCH_SIZE = 128  # Adjust based on your GPU memory
-NUM_WORKERS = 32  # Adjust based on your CPU cores
+BATCH_SIZE = 256  # Adjust based on your GPU memory
+NUM_WORKERS = 10  # Adjust based on your CPU cores
 LEARNING_RATE = 0.001 # Initial learning rate
 MOMENTUM = 0.9
 WEIGHT_DECAY = 1e-4
@@ -90,7 +90,7 @@ best_val_accuracy = 0.0
 if os.path.exists(CHECKPOINT_PATH):
     print(f"Loading checkpoint from '{CHECKPOINT_PATH}'")
     try:
-        checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
+        checkpoint = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=True)
         model_state_dict = checkpoint['model_state_dict']
         if isinstance(model, nn.DataParallel) and not list(model_state_dict.keys())[0].startswith('module.'):
             model_state_dict = {'module.' + k: v for k, v in model_state_dict.items()}
