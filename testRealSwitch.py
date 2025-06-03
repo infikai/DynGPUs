@@ -31,6 +31,7 @@ except ImportError:
 
 CHECKPOINT_DIR = "./checkpoints"
 IMAGENET_DATA_PATH = "/mydata/Data/imagenet" # User-specified path
+DOCKER_CONTAINER_NAME = "triton_server_instance_pm" # Unique name for the container
 
 def save_checkpoint(epoch, model, optimizer, loss, filename_prefix="checkpoint"):
     """Saves model checkpoint and measures time taken."""
@@ -156,8 +157,8 @@ def train():
 
     print(f"[TRAIN PID {os.getpid()}] Successfully loaded {len(train_dataset)} images from ImageNet training set.")
 
-    num_dataloader_workers = 2 if device.type == 'cuda' else 0 
-    batch_size = 64 if device.type == 'cuda' else 32 
+    num_dataloader_workers = 32 if device.type == 'cuda' else 0 
+    batch_size = 256 if device.type == 'cuda' else 32 
     print(f"[TRAIN PID {os.getpid()}] DataLoader using num_workers={num_dataloader_workers}, batch_size={batch_size}")
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_dataloader_workers, pin_memory=True if device.type == 'cuda' else False)
 
@@ -230,67 +231,119 @@ def serving():
     """
     print(f"[SERVING PID {os.getpid()}] Serving function started. Attempting to launch Triton Docker container...")
     
+    # Added --name {DOCKER_CONTAINER_NAME}
     docker_command_str = (
-        "docker run --gpus=1 --rm --net=host "
-        "-v /mydata/Data/server/docs/examples/model_repository:/models " 
-        "nvcr.io/nvidia/tritonserver:25.02-py3 " 
-        "tritonserver --model-repository=/models --model-control-mode explicit --load-model densenet_onnx"
+        f"docker run --name {DOCKER_CONTAINER_NAME} --gpus=1 --rm --net=host "
+        f"-v /mydata/Data/server/docs/examples/model_repository:/models " 
+        f"nvcr.io/nvidia/tritonserver:25.02-py3 " 
+        f"tritonserver --model-repository=/models --model-control-mode explicit --load-model densenet_onnx"
     )
     docker_command_list = docker_command_str.split()
     docker_process = None
-    process_group_id = None
+    process_group_id = None # To store the PGID of the docker run command
     
     try:
         print(f"[SERVING PID {os.getpid()}] Executing Docker command: {' '.join(docker_command_list)}")
-        # Start the Docker command in a new process group
         docker_process = subprocess.Popen(
             docker_command_list,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            preexec_fn=os.setsid  # Crucial for creating a new process group
+            preexec_fn=os.setsid 
         )
-        process_group_id = os.getpgid(docker_process.pid)
-        print(f"[SERVING PID {os.getpid()}] Triton Docker container started (Process PID: {docker_process.pid}, Process Group ID: {process_group_id}). Monitoring...")
+        # It's possible for Popen to fail to start the process, in which case pid might be None
+        if docker_process.pid is not None:
+            process_group_id = os.getpgid(docker_process.pid)
+            print(f"[SERVING PID {os.getpid()}] Triton Docker container process started (PID: {docker_process.pid}, Process Group ID: {process_group_id}). Monitoring...")
+        else:
+            print(f"[SERVING PID {os.getpid()}] Failed to get PID from Popen for Docker command. Cannot get PGID.")
+            # Handle error, maybe raise an exception or return
+            raise Exception("Failed to start Docker process and get PID.")
+
 
         while docker_process.poll() is None: 
             time.sleep(1) 
-        print(f"[SERVING PID {os.getpid()}] Docker process (PID: {docker_process.pid}) has exited with code {docker_process.returncode}.")
+        # This line is reached if the docker_process (the `docker run` command) itself terminates.
+        # It doesn't necessarily mean the container and Triton server inside it have cleanly shut down yet.
+        print(f"[SERVING PID {os.getpid()}] Docker Popen process (PID: {docker_process.pid}) has exited with code {docker_process.returncode}.")
 
     except FileNotFoundError:
         print(f"[SERVING PID {os.getpid()}] Error: 'docker' command not found. Is Docker installed and in PATH?")
     except Exception as e:
         print(f"[SERVING PID {os.getpid()}] Error in serving function (launching/managing Docker): {e}")
     finally:
-        print(f"[SERVING PID {os.getpid()}] ##### SERVING FUNCTION FINALLY BLOCK ENTERED #####")
-        if docker_process and docker_process.pid is not None and process_group_id is not None:
-            if docker_process.poll() is None: # Check if the main Popen process is still running
-                print(f"[SERVING PID {os.getpid()}] Attempting to stop Docker container process group (PGID: {process_group_id})...")
-                try:
-                    os.killpg(process_group_id, signal.SIGTERM) # Send SIGTERM to the entire process group
-                    docker_process.wait(timeout=15) # Wait for the main Popen process
-                    print(f"[SERVING PID {os.getpid()}] Docker process group terminated gracefully after SIGTERM.")
-                except ProcessLookupError: 
-                    print(f"[SERVING PID {os.getpid()}] Docker process group (PGID: {process_group_id}) not found during SIGTERM, likely already exited.")
-                except subprocess.TimeoutExpired:
-                    print(f"[SERVING PID {os.getpid()}] Docker process group (PGID: {process_group_id}) did not terminate in time after SIGTERM. Killing...")
+        print(f"[SERVING PID {os.getpid()}] ##### SERVING FUNCTION FINALLY BLOCK ENTERED ({DOCKER_CONTAINER_NAME}) #####")
+        
+        # Step 1: Attempt to stop the container by its name directly using Docker CLI
+        # This is often the most reliable way to ensure the container stops.
+        print(f"[SERVING PID {os.getpid()}] Attempting 'docker stop {DOCKER_CONTAINER_NAME}'...")
+        try:
+            # Using subprocess.run for simplicity for docker stop
+            # Increased timeout for docker stop to allow Triton to shut down
+            stop_result = subprocess.run(
+                ["docker", "stop", DOCKER_CONTAINER_NAME], 
+                timeout=20, # Docker's default stop timeout is 10s, this gives more leeway
+                capture_output=True, text=True, check=False # check=False to not raise error on non-zero exit
+            )
+            if stop_result.returncode == 0:
+                print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' succeeded.")
+            else:
+                # This can happen if the container was already stopped or never started properly.
+                print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' command finished with RC {stop_result.returncode}. Stderr: {stop_result.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' timed out. Container might still be running or taking long to stop.")
+        except FileNotFoundError: # docker command itself not found
+            print(f"[SERVING PID {os.getpid()}] 'docker' command not found while trying to stop container.")
+        except Exception as e_docker_stop:
+            print(f"[SERVING PID {os.getpid()}] Error during 'docker stop {DOCKER_CONTAINER_NAME}': {e_docker_stop}")
+
+        # Step 2: Clean up the Popen object for the `docker run` command
+        if docker_process and docker_process.pid is not None:
+            if docker_process.poll() is None: # If the `docker run` Popen object is still running
+                print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) still active. Attempting to terminate its process group.")
+                if process_group_id:
                     try:
-                        os.killpg(process_group_id, signal.SIGKILL) # Send SIGKILL to the group
-                        docker_process.wait(timeout=5) 
-                        print(f"[SERVING PID {os.getpid()}] Docker process group killed.")
+                        os.killpg(process_group_id, signal.SIGTERM) # Try to terminate the group
+                        docker_process.wait(timeout=5) # Wait for Popen object to be reaped
+                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) for 'docker run' terminated after SIGTERM.")
                     except ProcessLookupError:
-                         print(f"[SERVING PID {os.getpid()}] Docker process group (PGID: {process_group_id}) not found during SIGKILL, likely already exited.")
+                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) not found during SIGTERM (it might have exited).")
                     except subprocess.TimeoutExpired:
-                        print(f"[SERVING PID {os.getpid()}] Docker process group (PGID: {process_group_id}) failed to be killed.")
-                    except Exception as e_kill:
-                        print(f"[SERVING PID {os.getpid()}] Exception during Docker process group SIGKILL: {e_kill}")
-                except Exception as e_term: # Other exceptions during SIGTERM handling
-                    print(f"[SERVING PID {os.getpid()}] Exception during Docker process group SIGTERM: {e_term}")
-            else: 
-                print(f"[SERVING PID {os.getpid()}] Docker process (PID: {docker_process.pid}) already exited with code {docker_process.returncode} before explicit group kill.")
-        elif docker_process : 
-             print(f"[SERVING PID {os.getpid()}] Docker process object exists but PID or PGID is None or process already handled.")
-        else:
-            print(f"[SERVING PID {os.getpid()}] Docker process was not started or already cleaned up.")
+                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) did not terminate after SIGTERM. Killing group...")
+                        try:
+                            os.killpg(process_group_id, signal.SIGKILL)
+                            docker_process.wait(timeout=2)
+                            print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) killed.")
+                        except Exception as e_pg_kill: # Catch specific errors for killpg
+                            print(f"[SERVING PID {os.getpid()}] Error killing process group (PGID: {process_group_id}): {e_pg_kill}")
+                    except Exception as e_pg_term: # Catch other errors during SIGTERM
+                         print(f"[SERVING PID {os.getpid()}] Error terminating process group (PGID: {process_group_id}): {e_pg_term}")
+                else: # No PGID, try to terminate the Popen process directly
+                    print(f"[SERVING PID {os.getpid()}] No PGID, attempting to terminate Popen process (PID: {docker_process.pid}) directly.")
+                    docker_process.terminate()
+                    try:
+                        docker_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        docker_process.kill()
+                        docker_process.wait(timeout=2)
+
+            # Ensure Popen object is reaped if it exited on its own or was killed
+            if docker_process.poll() is not None:
+                 print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) has exited.")
+            else: # If still somehow alive
+                 print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) still alive after all attempts. Forcibly killing Popen object itself.")
+                 docker_process.kill()
+                 try:
+                    docker_process.wait(timeout=2)
+                 except subprocess.TimeoutExpired:
+                    print(f"[SERVING PID {os.getpid()}] Popen object kill timed out.")
+
+
+        # The --rm flag on `docker run` should handle container removal if `docker stop` was successful
+        # or if the process inside the container exited.
+        # An explicit `docker rm` could be added here if needed, but usually not necessary with --rm.
+        # print(f"[SERVING PID {os.getpid()}] Optionally, attempt 'docker rm {DOCKER_CONTAINER_NAME}' if --rm didn't catch it.")
+        # subprocess.run(["docker", "rm", DOCKER_CONTAINER_NAME], timeout=5, check=False)
+
         print(f"[SERVING PID {os.getpid()}] Serving function finished.")
 
 
@@ -360,9 +413,9 @@ def manage_processes():
                 try:
                     serving_process.terminate()  
                     # Increased timeout for the Python serving process to allow Docker cleanup
-                    serving_process.join(timeout=25) 
+                    serving_process.join(timeout=35) 
                     if serving_process.is_alive():
-                        print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) did not stop after terminate (25s). Forcing kill.")
+                        print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) did not stop after terminate (35s). Forcing kill.")
                         serving_process.kill()
                         serving_process.join(timeout=10)
                 except ProcessLookupError:
@@ -391,6 +444,7 @@ def monitor_thread_worker():
     print("MONITOR: Monitor thread started. Will check load every 2 seconds.")
     while not stop_monitor_event.is_set():
         manage_processes()
+        # Increased sleep time to 5 seconds to reduce log spam during testing, can be reverted to 2s
         time.sleep(5) 
     print("MONITOR: Monitor thread stopped.")
 
@@ -419,9 +473,9 @@ def cleanup_all_processes():
             try:
                 serving_process.terminate() 
                 # Increased timeout for the Python serving process to allow Docker cleanup
-                serving_process.join(timeout=25) 
+                serving_process.join(timeout=35) 
                 if serving_process.is_alive(): 
-                    print(f"MAIN: Serving Python process (PID: {serving_process.pid}) still alive after terminate (25s). Killing.")
+                    print(f"MAIN: Serving Python process (PID: {serving_process.pid}) still alive after terminate (35s). Killing.")
                     serving_process.kill()
                     serving_process.join(timeout=10) 
             except Exception as e:
@@ -444,6 +498,7 @@ if __name__ == "__main__":
         print(f"MAIN: Please ensure '{os.path.join(IMAGENET_DATA_PATH, 'train')}' exists and is structured for ImageFolder.")
 
     print("MAIN: Ensure Docker is running and you have permissions if serving is activated.")
+    print(f"MAIN: Docker container will be named: {DOCKER_CONTAINER_NAME}")
     print("MAIN: Ensure model repository path for Triton is correct (e.g., /mydata/Data/server/docs/examples/model_repository)")
     print(f"MAIN: Checkpoints will be saved in: {os.path.abspath(CHECKPOINT_DIR)}")
     print("MAIN: Enter an integer value for 'Load' to change system behavior.")
@@ -478,7 +533,7 @@ if __name__ == "__main__":
 
         if monitor.is_alive(): 
             print("MAIN: Waiting for monitor thread to finish...")
-            monitor.join(timeout=5) 
+            monitor.join(timeout=10) # Increased timeout for monitor to finish its last cycle if it's in manage_processes
             if monitor.is_alive():
                 print("MAIN: Monitor thread did not stop in time (this is okay as it's daemonic).")
         
