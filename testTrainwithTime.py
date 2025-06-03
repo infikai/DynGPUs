@@ -132,9 +132,9 @@ def train_one_epoch(epoch):
     batch_start_time = time.time()
 
     for batch_idx, (inputs, labels) in enumerate(train_loader):
-        inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True) # non_blocking for pin_memory
+        inputs, labels = inputs.to(device), labels.to(device)
 
-        optimizer.zero_grad(set_to_none=True) # set_to_none can improve performance slightly
+        optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
