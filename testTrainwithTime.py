@@ -8,11 +8,11 @@ import os
 import time # For timing epochs and checkpoints
 
 # --- Configuration ---
-DATA_DIR = '/path/to/your/imagenet' # IMPORTANT: Set this to your ImageNet directory
+DATA_DIR = '/mydata/Data/imagenet' # IMPORTANT: Set this to your ImageNet directory
 MODEL_NAME = 'resnet50'
 NUM_CLASSES = 1000 # ImageNet has 1000 classes
-BATCH_SIZE = 64  # Adjust based on your GPU memory
-NUM_WORKERS = 4  # Adjust based on your CPU cores
+BATCH_SIZE = 256  # Adjust based on your GPU memory
+NUM_WORKERS = 32  # Adjust based on your CPU cores
 LEARNING_RATE = 0.001 # Initial learning rate
 MOMENTUM = 0.9
 WEIGHT_DECAY = 1e-4
