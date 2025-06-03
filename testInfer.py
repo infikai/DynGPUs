@@ -14,7 +14,7 @@ def run_triton_server():
     Runs the Triton Inference Server Docker container and returns the process object.
     """
     global triton_process_global
-    current_working_directory = os.getcwd()
+    current_working_directory = '/mydata/Data/server/docs/examples'
     model_repository_path = os.path.join(current_working_directory, "model_repository")
 
     if not os.path.exists(model_repository_path):
