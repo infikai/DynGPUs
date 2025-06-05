@@ -31,14 +31,6 @@ CHECKPOINT_DIR = "./checkpoints"
 IMAGENET_DATA_PATH = "/mydata/Data/imagenet" # User-specified path
 DOCKER_CONTAINER_NAME = "triton_server_instance_pm" # Unique name for the container
 
-START_TIME_T2I = 0
-END_TIME_T2I = 0
-
-START_TIME_I2T = 0
-END_TIME_I2T = 0
-
-SYS_STATE = 0
-
 def save_checkpoint(epoch, model, optimizer, loss, filename_prefix="checkpoint"):
     """Saves model checkpoint and measures time taken."""
     if not PYTORCH_AVAILABLE:
@@ -354,6 +346,7 @@ def serving(st):
 # --- Global state and configuration ---
 Load = 0
 Max_Load = 50
+SYS_STATE = 1
 
 train_process = None
 serving_process = None
