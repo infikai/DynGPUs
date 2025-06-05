@@ -169,7 +169,7 @@ def train():
     epoch_for_interrupt_save = start_epoch
 
     end_time_training_init = time.time()
-    print(f"fully starting training job took {end_time_training_init - start_time_training_init:.2f}s)")
+    print(f"fully starting training job took {end_time_training_init - start_time_training_init:.2f}s")
 
     try:
         for epoch in range(start_epoch, max_epochs):
@@ -179,16 +179,16 @@ def train():
             epoch_loss_aggregator = 0.0
             num_batches_in_epoch = 0
 
+            start_time_moving = time.time()
+
             for i, (inputs, labels) in enumerate(train_loader):
                 if not running: break
 
-                start_time_moving = time.time()
+                end_time_moving = time.time()
+                if i == 0:
+                    print(f"Init batches loop took {end_time_moving - start_time_moving:.2f}s")
 
                 inputs, labels = inputs.to(device), labels.to(device)
-
-                end_time_moving = time.time()
-                if (i + 1) % 100 == 0:
-                    print(f"Moving one batch inputs and labels to GPU took {end_time_moving - start_time_moving:.2f}s)")
 
                 optimizer.zero_grad()
                 outputs = model(inputs)
@@ -201,7 +201,10 @@ def train():
                 current_epoch_loss = epoch_loss_aggregator
                 current_epoch_batches = num_batches_in_epoch
 
+                end_time_batch = time.time()
+
                 if (i + 1) % 100 == 0:
+                    print(f"The {i}th batche took {end_time_batch - end_time_moving:.2f}s")
                     print(f"[TRAIN PID {os.getpid()}] Epoch {epoch+1}, Batch {i+1}/{len(train_loader)}, Loss: {loss.item():.4f}")
 
             if not running: break
