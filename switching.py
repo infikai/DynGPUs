@@ -422,7 +422,7 @@ def manage_processes():
         elif Load <= Max_Load:
             if SYS_STATE == 1:
                 strat_time_switching = time.time()
-                START_TIME_I2T = = multiprocessing.Value('d', time.time())
+                START_TIME_I2T = multiprocessing.Value('d', time.time())
             if serving_is_effectively_running:
                 print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Shutting down serving (Docker container: {DOCKER_CONTAINER_NAME}, Python Process PID: {serving_process.pid}).")
 
