@@ -347,6 +347,7 @@ def serving(st):
 Load = 0
 Max_Load = 50
 SYS_STATE = 1
+START_TIME_I2T = multiprocessing.Value('d', 0)
 
 train_process = None
 serving_process = None
