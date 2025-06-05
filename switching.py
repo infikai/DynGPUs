@@ -195,7 +195,7 @@ def train():
                 end_time_moving = time.time()
                 if i == 0:
                     print(f"Init batches loop took {end_time_moving - start_time_moving:.2f}s")
-                if start_epoch == epoch && i == 0:
+                if start_epoch == epoch and i == 0:
                     END_TIME_I2T = time.time()
                     print(f"Fully I2T took {END_TIME_I2T - START_TIME_I2T:.2f}s")
 
@@ -380,8 +380,9 @@ def manage_processes():
         serving_is_effectively_running = serving_process is not None and serving_process.is_alive()
 
         if Load > Max_Load:
-            strat_time_switching = time.time()
-            START_TIME_T2I = time.time()
+            if SYS_STATE == 0:
+                strat_time_switching = time.time()
+                START_TIME_T2I = time.time()
             if train_is_effectively_running:
                 print(f"MONITOR: Load ({Load}) > Max_Load ({Max_Load}). Attempting to shut down training (PID: {train_process.pid}).")
                 try:
@@ -412,13 +413,16 @@ def manage_processes():
                 serving_process = multiprocessing.Process(target=serving_worker_entry, daemon=False)
                 serving_process.start()
                 print(f"MONITOR: Serving process started (PID: {serving_process.pid}).")
-            end_time_switching = time.time()
-            print(f"Shuting train and call infer up took {end_time_switching - strat_time_switching:.2f}s")
+            if SYS_STATE == 0:
+                end_time_switching = time.time()
+                print(f"Shuting train and call infer up took {end_time_switching - strat_time_switching:.2f}s")
+            SYS_STATE = 1
 
 
         elif Load <= Max_Load:
-            strat_time_switching = time.time()
-            START_TIME_I2T = time.time()
+            if SYS_STATE == 1:
+                strat_time_switching = time.time()
+                START_TIME_I2T = time.time()
             if serving_is_effectively_running:
                 print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Shutting down serving (Docker container: {DOCKER_CONTAINER_NAME}, Python Process PID: {serving_process.pid}).")
 
@@ -472,8 +476,10 @@ def manage_processes():
                 train_process = multiprocessing.Process(target=train_worker_entry, daemon=False)
                 train_process.start()
                 print(f"MONITOR: Training process started (PID: {train_process.pid}).")
-            end_time_switching = time.time()
-            print(f"Shuting infer and call train up took {end_time_switching - strat_time_switching:.2f}s")
+            if SYS_STATE == 1:
+                end_time_switching = time.time()
+                print(f"Shuting infer and call train up took {end_time_switching - strat_time_switching:.2f}s")
+            SYS_STATE = 0
 
 def monitor_thread_worker():
     print("MONITOR: Monitor thread started. Will check load every 2 seconds.")
