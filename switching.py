@@ -366,7 +366,7 @@ def serving_worker_entry(st):
 
 # --- Core logic: Process Management ---
 def manage_processes():
-    global train_process, serving_process, Load, Max_Load, SYS_STATE, START_TIME_I2T, START_TIME_T2I, END_TIME_I2T, END_TIME_T2I
+    global train_process, serving_process, Load, Max_Load, SYS_STATE
 
     with process_management_lock:
         train_is_effectively_running = train_process is not None and train_process.is_alive()
