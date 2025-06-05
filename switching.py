@@ -37,6 +37,8 @@ END_TIME_T2I = 0
 START_TIME_I2T = 0
 END_TIME_I2T = 0
 
+SYS_STATE = 0
+
 def save_checkpoint(epoch, model, optimizer, loss, filename_prefix="checkpoint"):
     """Saves model checkpoint and measures time taken."""
     if not PYTORCH_AVAILABLE:
@@ -193,7 +195,7 @@ def train():
                 end_time_moving = time.time()
                 if i == 0:
                     print(f"Init batches loop took {end_time_moving - start_time_moving:.2f}s")
-                if start_epoch == epoch:
+                if start_epoch == epoch && i == 0:
                     END_TIME_I2T = time.time()
                     print(f"Fully I2T took {END_TIME_I2T - START_TIME_I2T:.2f}s")
 
