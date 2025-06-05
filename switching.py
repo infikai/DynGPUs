@@ -473,7 +473,7 @@ def manage_processes():
                     train_process.close()
                     train_process = None
                 print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Starting training...")
-                train_process = multiprocessing.Process(target=train_worker_entry, daemon=False)
+                train_process = multiprocessing.Process(target=train_worker_entry, args=(START_TIME_I2T), daemon=False)
                 train_process.start()
                 print(f"MONITOR: Training process started (PID: {train_process.pid}).")
             if SYS_STATE == 1:
