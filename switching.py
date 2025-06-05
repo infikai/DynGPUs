@@ -356,12 +356,14 @@ stop_monitor_event = threading.Event()
 # --- Worker entry points for multiprocessing ---
 def train_worker_entry(st):
     print(f"MONITOR: Train worker process (PID: {os.getpid()}) starting train().")
-    train(st.value)
+    s = st.value
+    train(s)
     print(f"MONITOR: Train worker process (PID: {os.getpid()}) exiting.")
 
 def serving_worker_entry(st):
     print(f"MONITOR: Serving worker process (PID: {os.getpid()}) starting serving().")
-    serving(st.value)
+    s = st.value
+    serving(s)
     print(f"MONITOR: Serving worker process (PID: {os.getpid()}) exiting.")
 
 # --- Core logic: Process Management ---
