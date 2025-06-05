@@ -408,7 +408,7 @@ def manage_processes():
                 print(f"MONITOR: Load ({Load}) > Max_Load ({Max_Load}). Starting serving...")
                 serving_process = multiprocessing.Process(target=serving_worker_entry, args=(START_TIME_T2I,), daemon=False)
                 serving_process.start()
-                time.sleep(5)
+                time.sleep(3)
                 print(f"MONITOR: Serving process started (PID: {serving_process.pid}).")
             if SYS_STATE == 0:
                 end_time_switching = time.time()
@@ -472,7 +472,7 @@ def manage_processes():
                 print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Starting training...")
                 train_process = multiprocessing.Process(target=train_worker_entry, args=(START_TIME_I2T,), daemon=False)
                 train_process.start()
-                time.sleep(5)
+                time.sleep(3)
                 print(f"MONITOR: Training process started (PID: {train_process.pid}).")
             if SYS_STATE == 1:
                 end_time_switching = time.time()
