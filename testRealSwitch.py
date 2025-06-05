@@ -231,7 +231,6 @@ def serving():
     """
     print(f"[SERVING PID {os.getpid()}] Serving function started. Attempting to launch Triton Docker container...")
     
-    # Added --name {DOCKER_CONTAINER_NAME}
     docker_command_str = (
         f"docker run --name {DOCKER_CONTAINER_NAME} --gpus=1 --rm --net=host "
         f"-v /mydata/Data/server/docs/examples/model_repository:/models " 
@@ -240,7 +239,7 @@ def serving():
     )
     docker_command_list = docker_command_str.split()
     docker_process = None
-    process_group_id = None # To store the PGID of the docker run command
+    process_group_id = None 
     
     try:
         print(f"[SERVING PID {os.getpid()}] Executing Docker command: {' '.join(docker_command_list)}")
@@ -250,20 +249,15 @@ def serving():
             stderr=subprocess.PIPE,
             preexec_fn=os.setsid 
         )
-        # It's possible for Popen to fail to start the process, in which case pid might be None
         if docker_process.pid is not None:
             process_group_id = os.getpgid(docker_process.pid)
             print(f"[SERVING PID {os.getpid()}] Triton Docker container process started (PID: {docker_process.pid}, Process Group ID: {process_group_id}). Monitoring...")
         else:
             print(f"[SERVING PID {os.getpid()}] Failed to get PID from Popen for Docker command. Cannot get PGID.")
-            # Handle error, maybe raise an exception or return
             raise Exception("Failed to start Docker process and get PID.")
-
 
         while docker_process.poll() is None: 
             time.sleep(1) 
-        # This line is reached if the docker_process (the `docker run` command) itself terminates.
-        # It doesn't necessarily mean the container and Triton server inside it have cleanly shut down yet.
         print(f"[SERVING PID {os.getpid()}] Docker Popen process (PID: {docker_process.pid}) has exited with code {docker_process.returncode}.")
 
     except FileNotFoundError:
@@ -273,52 +267,46 @@ def serving():
     finally:
         print(f"[SERVING PID {os.getpid()}] ##### SERVING FUNCTION FINALLY BLOCK ENTERED ({DOCKER_CONTAINER_NAME}) #####")
         
-        # Step 1: Attempt to stop the container by its name directly using Docker CLI
-        # This is often the most reliable way to ensure the container stops.
-        print(f"[SERVING PID {os.getpid()}] Attempting 'docker stop {DOCKER_CONTAINER_NAME}'...")
+        print(f"[SERVING PID {os.getpid()}] Attempting 'docker stop {DOCKER_CONTAINER_NAME}' (if not already stopped)...")
         try:
-            # Using subprocess.run for simplicity for docker stop
-            # Increased timeout for docker stop to allow Triton to shut down
             stop_result = subprocess.run(
                 ["docker", "stop", DOCKER_CONTAINER_NAME], 
-                timeout=20, # Docker's default stop timeout is 10s, this gives more leeway
-                capture_output=True, text=True, check=False # check=False to not raise error on non-zero exit
+                timeout=20, 
+                capture_output=True, text=True, check=False 
             )
             if stop_result.returncode == 0:
-                print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' succeeded.")
+                print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' succeeded via finally block.")
             else:
-                # This can happen if the container was already stopped or never started properly.
-                print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' command finished with RC {stop_result.returncode}. Stderr: {stop_result.stderr.strip()}")
+                print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' (in finally) finished with RC {stop_result.returncode}. Stderr: {stop_result.stderr.strip()}")
         except subprocess.TimeoutExpired:
-            print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' timed out. Container might still be running or taking long to stop.")
-        except FileNotFoundError: # docker command itself not found
-            print(f"[SERVING PID {os.getpid()}] 'docker' command not found while trying to stop container.")
+            print(f"[SERVING PID {os.getpid()}] 'docker stop {DOCKER_CONTAINER_NAME}' (in finally) timed out.")
+        except FileNotFoundError: 
+            print(f"[SERVING PID {os.getpid()}] 'docker' command not found (in finally) while trying to stop container.")
         except Exception as e_docker_stop:
-            print(f"[SERVING PID {os.getpid()}] Error during 'docker stop {DOCKER_CONTAINER_NAME}': {e_docker_stop}")
+            print(f"[SERVING PID {os.getpid()}] Error during 'docker stop {DOCKER_CONTAINER_NAME}' (in finally): {e_docker_stop}")
 
-        # Step 2: Clean up the Popen object for the `docker run` command
         if docker_process and docker_process.pid is not None:
-            if docker_process.poll() is None: # If the `docker run` Popen object is still running
-                print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) still active. Attempting to terminate its process group.")
+            if docker_process.poll() is None: 
+                print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) still active (in finally). Attempting to terminate its process group.")
                 if process_group_id:
                     try:
-                        os.killpg(process_group_id, signal.SIGTERM) # Try to terminate the group
-                        docker_process.wait(timeout=5) # Wait for Popen object to be reaped
-                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) for 'docker run' terminated after SIGTERM.")
+                        os.killpg(process_group_id, signal.SIGTERM) 
+                        docker_process.wait(timeout=5) 
+                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) for 'docker run' terminated after SIGTERM (in finally).")
                     except ProcessLookupError:
-                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) not found during SIGTERM (it might have exited).")
+                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) not found during SIGTERM (in finally).")
                     except subprocess.TimeoutExpired:
-                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) did not terminate after SIGTERM. Killing group...")
+                        print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) did not terminate after SIGTERM (in finally). Killing group...")
                         try:
                             os.killpg(process_group_id, signal.SIGKILL)
                             docker_process.wait(timeout=2)
-                            print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) killed.")
-                        except Exception as e_pg_kill: # Catch specific errors for killpg
-                            print(f"[SERVING PID {os.getpid()}] Error killing process group (PGID: {process_group_id}): {e_pg_kill}")
-                    except Exception as e_pg_term: # Catch other errors during SIGTERM
-                         print(f"[SERVING PID {os.getpid()}] Error terminating process group (PGID: {process_group_id}): {e_pg_term}")
-                else: # No PGID, try to terminate the Popen process directly
-                    print(f"[SERVING PID {os.getpid()}] No PGID, attempting to terminate Popen process (PID: {docker_process.pid}) directly.")
+                            print(f"[SERVING PID {os.getpid()}] Process group (PGID: {process_group_id}) killed (in finally).")
+                        except Exception as e_pg_kill: 
+                            print(f"[SERVING PID {os.getpid()}] Error killing process group (PGID: {process_group_id}) (in finally): {e_pg_kill}")
+                    except Exception as e_pg_term: 
+                         print(f"[SERVING PID {os.getpid()}] Error terminating process group (PGID: {process_group_id}) (in finally): {e_pg_term}")
+                else: 
+                    print(f"[SERVING PID {os.getpid()}] No PGID, attempting to terminate Popen process (PID: {docker_process.pid}) directly (in finally).")
                     docker_process.terminate()
                     try:
                         docker_process.wait(timeout=5)
@@ -326,24 +314,15 @@ def serving():
                         docker_process.kill()
                         docker_process.wait(timeout=2)
 
-            # Ensure Popen object is reaped if it exited on its own or was killed
             if docker_process.poll() is not None:
-                 print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) has exited.")
-            else: # If still somehow alive
-                 print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) still alive after all attempts. Forcibly killing Popen object itself.")
+                 print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) has exited (in finally).")
+            else: 
+                 print(f"[SERVING PID {os.getpid()}] Popen object for 'docker run' (PID: {docker_process.pid}) still alive after all attempts (in finally). Forcibly killing.")
                  docker_process.kill()
                  try:
                     docker_process.wait(timeout=2)
                  except subprocess.TimeoutExpired:
-                    print(f"[SERVING PID {os.getpid()}] Popen object kill timed out.")
-
-
-        # The --rm flag on `docker run` should handle container removal if `docker stop` was successful
-        # or if the process inside the container exited.
-        # An explicit `docker rm` could be added here if needed, but usually not necessary with --rm.
-        # print(f"[SERVING PID {os.getpid()}] Optionally, attempt 'docker rm {DOCKER_CONTAINER_NAME}' if --rm didn't catch it.")
-        # subprocess.run(["docker", "rm", DOCKER_CONTAINER_NAME], timeout=5, check=False)
-
+                    print(f"[SERVING PID {os.getpid()}] Popen object kill timed out (in finally).")
         print(f"[SERVING PID {os.getpid()}] Serving function finished.")
 
 
@@ -409,17 +388,39 @@ def manage_processes():
 
         elif Load <= Max_Load: 
             if serving_is_effectively_running:
-                print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Attempting to shut down serving (PID: {serving_process.pid}).")
+                print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Shutting down serving (Docker container: {DOCKER_CONTAINER_NAME}, Python Process PID: {serving_process.pid}).")
+                
+                # Step 1: Directly try to stop the Docker container by name
+                print(f"MONITOR: Attempting 'docker stop {DOCKER_CONTAINER_NAME}' directly...")
+                try:
+                    stop_result = subprocess.run(
+                        ["docker", "stop", DOCKER_CONTAINER_NAME], 
+                        timeout=20, # Give Docker time to stop Triton
+                        capture_output=True, text=True, check=False
+                    )
+                    if stop_result.returncode == 0:
+                        print(f"MONITOR: 'docker stop {DOCKER_CONTAINER_NAME}' succeeded from manage_processes.")
+                    else:
+                        print(f"MONITOR: 'docker stop {DOCKER_CONTAINER_NAME}' (from manage_processes) finished with RC {stop_result.returncode}. Stderr: {stop_result.stderr.strip()}")
+                except subprocess.TimeoutExpired:
+                    print(f"MONITOR: 'docker stop {DOCKER_CONTAINER_NAME}' (from manage_processes) timed out.")
+                except FileNotFoundError:
+                    print(f"MONITOR: 'docker' command not found (from manage_processes) while trying to stop container.")
+                except Exception as e_docker_stop_direct:
+                    print(f"MONITOR: Error during direct 'docker stop {DOCKER_CONTAINER_NAME}' (from manage_processes): {e_docker_stop_direct}")
+
+                # Step 2: Terminate the Python process hosting the serving() function
+                print(f"MONITOR: Terminating Python serving process (PID: {serving_process.pid}).")
                 try:
                     serving_process.terminate()  
-                    # Increased timeout for the Python serving process to allow Docker cleanup
-                    serving_process.join(timeout=35) 
+                    serving_process.join(timeout=15) # Reduced timeout as docker stop was attempted first
+                                                      # This join is for the Python process itself.
                     if serving_process.is_alive():
-                        print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) did not stop after terminate (35s). Forcing kill.")
+                        print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) did not stop after terminate (15s). Forcing kill.")
                         serving_process.kill()
                         serving_process.join(timeout=10)
                 except ProcessLookupError:
-                     print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) not found.")
+                     print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) not found during terminate/kill.")
                 except Exception as e:
                     print(f"MONITOR: Error stopping serving Python process (PID: {serving_process.pid if serving_process else 'N/A'}): {e}")
                 finally:
@@ -428,7 +429,7 @@ def manage_processes():
                         serving_process = None
                         print("MONITOR: Serving Python process confirmed shut down.")
                     elif serving_process:
-                        print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) still alive.")
+                        print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) still alive after all attempts.")
             
             train_is_effectively_running = train_process is not None and train_process.is_alive() 
             if not train_is_effectively_running:
@@ -444,7 +445,6 @@ def monitor_thread_worker():
     print("MONITOR: Monitor thread started. Will check load every 2 seconds.")
     while not stop_monitor_event.is_set():
         manage_processes()
-        # Increased sleep time to 5 seconds to reduce log spam during testing, can be reverted to 2s
         time.sleep(5) 
     print("MONITOR: Monitor thread stopped.")
 
@@ -469,13 +469,27 @@ def cleanup_all_processes():
                 train_process = None
 
         if serving_process and serving_process.is_alive():
-            print(f"MAIN: Cleaning up serving Python process (PID: {serving_process.pid})...")
+            print(f"MAIN: Cleaning up serving Python process (PID: {serving_process.pid}). Docker container: {DOCKER_CONTAINER_NAME}")
+            # Attempt direct docker stop first during final cleanup as well
+            print(f"MAIN: Attempting 'docker stop {DOCKER_CONTAINER_NAME}' during final cleanup...")
+            try:
+                stop_result = subprocess.run(
+                    ["docker", "stop", DOCKER_CONTAINER_NAME], 
+                    timeout=20, capture_output=True, text=True, check=False
+                )
+                if stop_result.returncode == 0:
+                    print(f"MAIN: 'docker stop {DOCKER_CONTAINER_NAME}' (final cleanup) succeeded.")
+                else:
+                    print(f"MAIN: 'docker stop {DOCKER_CONTAINER_NAME}' (final cleanup) finished with RC {stop_result.returncode}. Stderr: {stop_result.stderr.strip()}")
+            except Exception as e_docker_stop_final:
+                print(f"MAIN: Error during final 'docker stop {DOCKER_CONTAINER_NAME}': {e_docker_stop_final}")
+
+            # Then proceed to terminate the Python process
             try:
                 serving_process.terminate() 
-                # Increased timeout for the Python serving process to allow Docker cleanup
-                serving_process.join(timeout=35) 
+                serving_process.join(timeout=15) 
                 if serving_process.is_alive(): 
-                    print(f"MAIN: Serving Python process (PID: {serving_process.pid}) still alive after terminate (35s). Killing.")
+                    print(f"MAIN: Serving Python process (PID: {serving_process.pid}) still alive after terminate (15s). Killing.")
                     serving_process.kill()
                     serving_process.join(timeout=10) 
             except Exception as e:
@@ -533,7 +547,7 @@ if __name__ == "__main__":
 
         if monitor.is_alive(): 
             print("MAIN: Waiting for monitor thread to finish...")
-            monitor.join(timeout=10) # Increased timeout for monitor to finish its last cycle if it's in manage_processes
+            monitor.join(timeout=10) 
             if monitor.is_alive():
                 print("MAIN: Monitor thread did not stop in time (this is okay as it's daemonic).")
         
