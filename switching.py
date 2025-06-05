@@ -347,7 +347,6 @@ def serving(st):
 Load = 0
 Max_Load = 50
 SYS_STATE = 1
-START_TIME_I2T = multiprocessing.Value('d', 0)
 
 train_process = None
 serving_process = None
@@ -368,6 +367,7 @@ def serving_worker_entry(st):
 # --- Core logic: Process Management ---
 def manage_processes():
     global train_process, serving_process, Load, Max_Load, SYS_STATE
+    START_TIME_I2T = multiprocessing.Value('d', 1)
 
     with process_management_lock:
         train_is_effectively_running = train_process is not None and train_process.is_alive()
