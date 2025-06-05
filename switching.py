@@ -93,7 +93,7 @@ def load_checkpoint(model, optimizer, filename="latest_checkpoint.pth"):
         return 0, None
 
 
-def train():
+def train(st):
     """
     PyTorch training function for ResNet50 with ImageNet data.
     Includes checkpointing.
@@ -197,7 +197,7 @@ def train():
                     print(f"Init batches loop took {end_time_moving - start_time_moving:.2f}s")
                 if start_epoch == epoch and i == 0:
                     END_TIME_I2T = time.time()
-                    print(f"Fully I2T took {END_TIME_I2T - START_TIME_I2T:.2f}s")
+                    print(f"Fully I2T took {END_TIME_I2T - st:.2f}s")
 
                 inputs, labels = inputs.to(device), labels.to(device)
 
@@ -247,7 +247,7 @@ def train():
         print(f"[TRAIN PID {os.getpid()}] PyTorch Training function finished.")
 
 
-def serving():
+def serving(st):
     """
     Starts the NVIDIA Triton Inference Server using Docker.
     Manages the Docker subprocess.
@@ -276,7 +276,7 @@ def serving():
             process_group_id = os.getpgid(docker_process.pid)
             print(f"[SERVING PID {os.getpid()}] Triton Docker container process started (PID: {docker_process.pid}, Process Group ID: {process_group_id}). Monitoring...")
             END_TIME_T2I = time.time()
-            print(f"Fully T2I took {END_TIME_T2I - START_TIME_T2I:.2f}s")
+            print(f"Fully T2I took {END_TIME_T2I - st:.2f}s")
         else:
             print(f"[SERVING PID {os.getpid()}] Failed to get PID from Popen for Docker command. Cannot get PGID.")
             raise Exception("Failed to start Docker process and get PID.")
@@ -361,14 +361,14 @@ process_management_lock = threading.Lock()
 stop_monitor_event = threading.Event()
 
 # --- Worker entry points for multiprocessing ---
-def train_worker_entry():
+def train_worker_entry(st):
     print(f"MONITOR: Train worker process (PID: {os.getpid()}) starting train().")
-    train()
+    train(st.value)
     print(f"MONITOR: Train worker process (PID: {os.getpid()}) exiting.")
 
-def serving_worker_entry():
+def serving_worker_entry(st):
     print(f"MONITOR: Serving worker process (PID: {os.getpid()}) starting serving().")
-    serving()
+    serving(st.value)
     print(f"MONITOR: Serving worker process (PID: {os.getpid()}) exiting.")
 
 # --- Core logic: Process Management ---
@@ -382,7 +382,7 @@ def manage_processes():
         if Load > Max_Load:
             if SYS_STATE == 0:
                 strat_time_switching = time.time()
-                START_TIME_T2I = time.time()
+                START_TIME_T2I = multiprocessing.Value('d', time.time())
             if train_is_effectively_running:
                 print(f"MONITOR: Load ({Load}) > Max_Load ({Max_Load}). Attempting to shut down training (PID: {train_process.pid}).")
                 try:
@@ -410,7 +410,7 @@ def manage_processes():
                     serving_process.close()
                     serving_process = None
                 print(f"MONITOR: Load ({Load}) > Max_Load ({Max_Load}). Starting serving...")
-                serving_process = multiprocessing.Process(target=serving_worker_entry, daemon=False)
+                serving_process = multiprocessing.Process(target=serving_worker_entry, args=(START_TIME_T2I), daemon=False)
                 serving_process.start()
                 print(f"MONITOR: Serving process started (PID: {serving_process.pid}).")
             if SYS_STATE == 0:
@@ -422,7 +422,7 @@ def manage_processes():
         elif Load <= Max_Load:
             if SYS_STATE == 1:
                 strat_time_switching = time.time()
-                START_TIME_I2T = time.time()
+                START_TIME_I2T = = multiprocessing.Value('d', time.time())
             if serving_is_effectively_running:
                 print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Shutting down serving (Docker container: {DOCKER_CONTAINER_NAME}, Python Process PID: {serving_process.pid}).")
 
