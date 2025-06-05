@@ -169,7 +169,7 @@ def train():
     epoch_for_interrupt_save = start_epoch
 
     end_time_training_init = time.time()
-    print("fully starting training job took {end_time_training_init - start_time_training_init:.2f}s)")
+    print(f"fully starting training job took {end_time_training_init - start_time_training_init:.2f}s)")
 
     try:
         for epoch in range(start_epoch, max_epochs):
@@ -182,7 +182,13 @@ def train():
             for i, (inputs, labels) in enumerate(train_loader):
                 if not running: break
 
+                start_time_moving = time.time()
+
                 inputs, labels = inputs.to(device), labels.to(device)
+
+                end_time_moving = time.time()
+                if (i + 1) % 100 == 0:
+                    print(f"Moving one batch inputs and labels to GPU took {end_time_moving - start_time_moving:.2f}s)")
 
                 optimizer.zero_grad()
                 outputs = model(inputs)
