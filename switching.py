@@ -431,4 +431,129 @@ def manage_processes():
                         serving_process.close()
                         serving_process = None
                         print("MONITOR: Serving Python process confirmed shut down.")
-                    elif serving_
+                    elif serving_process:
+                        print(f"MONITOR: Serving Python process (PID: {serving_process.pid}) still alive after all attempts.")
+
+            train_is_effectively_running = train_process is not None and train_process.is_alive()
+            if not train_is_effectively_running:
+                if train_process and not train_process.is_alive():
+                    train_process.close()
+                    train_process = None
+                print(f"MONITOR: Load ({Load}) <= Max_Load ({Max_Load}). Starting training...")
+                train_process = multiprocessing.Process(target=train_worker_entry, daemon=False)
+                train_process.start()
+                print(f"MONITOR: Training process started (PID: {train_process.pid}).")
+
+def monitor_thread_worker():
+    print("MONITOR: Monitor thread started. Will check load every 2 seconds.")
+    while not stop_monitor_event.is_set():
+        manage_processes()
+        time.sleep(5) # Check frequency
+    print("MONITOR: Monitor thread stopped.")
+
+def cleanup_all_processes():
+    print("MAIN: Initiating cleanup of all child processes...")
+    global train_process, serving_process
+
+    with process_management_lock:
+        if train_process and train_process.is_alive():
+            print(f"MAIN: Cleaning up training process (PID: {train_process.pid})...")
+            try:
+                os.kill(train_process.pid, signal.SIGINT)
+                train_process.join(timeout=30)
+                if train_process.is_alive():
+                    print(f"MAIN: Training (PID: {train_process.pid}) still alive after SIGINT (30s). Killing.")
+                    train_process.kill()
+                    train_process.join(timeout=5)
+            except Exception as e:
+                print(f"MAIN: Error cleaning up training process: {e}")
+            finally:
+                if train_process: train_process.close()
+                train_process = None
+
+        if serving_process and serving_process.is_alive():
+            print(f"MAIN: Cleaning up serving Python process (PID: {serving_process.pid}). Docker container: {DOCKER_CONTAINER_NAME}")
+            # Attempt direct docker stop first during final cleanup as well
+            print(f"MAIN: Attempting 'docker stop {DOCKER_CONTAINER_NAME}' during final cleanup...")
+            try:
+                stop_result = subprocess.run(
+                    ["docker", "stop", DOCKER_CONTAINER_NAME],
+                    timeout=20, capture_output=True, text=True, check=False
+                )
+                if stop_result.returncode == 0:
+                    print(f"MAIN: 'docker stop {DOCKER_CONTAINER_NAME}' (final cleanup) succeeded.")
+                else:
+                    print(f"MAIN: 'docker stop {DOCKER_CONTAINER_NAME}' (final cleanup) finished with RC {stop_result.returncode}. Stderr: {stop_result.stderr.strip()}")
+            except Exception as e_docker_stop_final:
+                print(f"MAIN: Error during final 'docker stop {DOCKER_CONTAINER_NAME}': {e_docker_stop_final}")
+
+            # Then proceed to terminate the Python process
+            try:
+                serving_process.terminate()
+                serving_process.join(timeout=15)
+                if serving_process.is_alive():
+                    print(f"MAIN: Serving Python process (PID: {serving_process.pid}) still alive after terminate (15s). Killing.")
+                    serving_process.kill()
+                    serving_process.join(timeout=10)
+            except Exception as e:
+                print(f"MAIN: Error cleaning up serving Python process: {e}")
+            finally:
+                if serving_process: serving_process.close()
+                serving_process = None
+    print("MAIN: Cleanup finished.")
+
+# --- Main execution ---
+if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn', force=True)
+    multiprocessing.freeze_support()
+
+    print(f"MAIN: Program started. Default Max_Load is {Max_Load}. Initial Load is {Load}.")
+    if not PYTORCH_AVAILABLE:
+        print("MAIN: Note - PyTorch is not installed, training will use a placeholder.")
+    else:
+        print(f"MAIN: Attempting to use ImageNet data from: {IMAGENET_DATA_PATH}")
+        print(f"MAIN: Please ensure '{os.path.join(IMAGENET_DATA_PATH, 'train')}' exists and is structured for ImageFolder.")
+
+    print("MAIN: Ensure Docker is running and you have permissions if serving is activated.")
+    print(f"MAIN: Docker container will be named: {DOCKER_CONTAINER_NAME}")
+    print("MAIN: Ensure model repository path for Triton is correct (e.g., /mydata/Data/server/docs/examples/model_repository)")
+    print(f"MAIN: Checkpoints will be saved in: {os.path.abspath(CHECKPOINT_DIR)}")
+    print("MAIN: Enter an integer value for 'Load' to change system behavior.")
+    print("MAIN: Type 'q' or 'quit' to exit.")
+
+    monitor = threading.Thread(target=monitor_thread_worker, daemon=True)
+    monitor.start()
+
+    try:
+        while True:
+            try:
+                user_input = input(f"Enter new Load (current: {Load}, max: {Max_Load}) (or 'q' to quit): ")
+                if user_input.lower() in ['q', 'quit']:
+                    print("MAIN: Quit command received. Shutting down...")
+                    break
+
+                new_load = int(user_input)
+                Load = new_load
+                print(f"MAIN: Load updated to {Load}. Monitor will adjust processes shortly.")
+
+            except ValueError:
+                print("MAIN: Invalid input. Please enter an integer for Load or 'q' to quit.")
+            except EOFError:
+                print("MAIN: EOF detected, exiting...")
+                break
+
+    except KeyboardInterrupt:
+        print("MAIN: KeyboardInterrupt received in main loop. Shutting down...")
+    finally:
+        print("MAIN: Starting final shutdown sequence...")
+        stop_monitor_event.set()
+
+        if monitor.is_alive():
+            print("MAIN: Waiting for monitor thread to finish...")
+            monitor.join(timeout=10)
+            if monitor.is_alive():
+                print("MAIN: Monitor thread did not stop in time (this is okay as it's daemonic).")
+
+        cleanup_all_processes()
+
+        print("MAIN: Program terminated.")
