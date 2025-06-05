@@ -77,7 +77,7 @@ def load_checkpoint(model, optimizer, filename="latest_checkpoint.pth"):
     if os.path.isfile(filepath):
         print(f"[TRAIN PID {os.getpid()}] Loading checkpoint '{filepath}'")
         try:
-            checkpoint = torch.load(filepath, map_location=lambda storage, loc: storage)
+            checkpoint = torch.load(filepath, map_location=lambda storage, loc: storage, weights_only=True)
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
@@ -373,7 +373,7 @@ def serving_worker_entry():
 
 # --- Core logic: Process Management ---
 def manage_processes():
-    global train_process, serving_process, Load, Max_Load, SYS_STATE
+    global train_process, serving_process, Load, Max_Load, SYS_STATE, START_TIME_I2T, START_TIME_T2I, END_TIME_I2T, END_TIME_T2I
 
     with process_management_lock:
         train_is_effectively_running = train_process is not None and train_process.is_alive()
