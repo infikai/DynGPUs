@@ -373,6 +373,7 @@ def serving_worker_entry(st):
 def manage_processes():
     global train_process, serving_process, Load, Max_Load, SYS_STATE
     START_TIME_I2T = multiprocessing.Value('d', 1)
+    START_TIME_T2I = multiprocessing.Value('d', 1)
 
     with process_management_lock:
         train_is_effectively_running = train_process is not None and train_process.is_alive()
