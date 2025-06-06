@@ -120,7 +120,10 @@ def train(st):
     if not os.path.exists(CHECKPOINT_DIR):
         os.makedirs(CHECKPOINT_DIR)
 
+    start_time_loadCP = time.time()
     start_epoch, _ = load_checkpoint(model, optimizer)
+    end_time_loadCP = time.time()
+    print(f"Loading checkpoint took {end_time_loadCP-start_time_loadCP}s")
 
     model.train()
 
