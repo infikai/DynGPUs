@@ -163,7 +163,10 @@ def train(st):
     num_dataloader_workers = 32 if device.type == 'cuda' else 0
     batch_size = 256 if device.type == 'cuda' else 32
     print(f"[TRAIN PID {os.getpid()}] DataLoader using num_workers={num_dataloader_workers}, batch_size={batch_size}")
+    start_time_data_loader = time.time()
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_dataloader_workers, pin_memory=True if device.type == 'cuda' else False)
+    end_time_data_loader = time.time()
+    print(f"Dataloader job took {end_time_data_loader - start_time_data_loader:.2f}s")
 
     max_epochs = 100
     running = True
