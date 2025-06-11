@@ -255,7 +255,7 @@ def serving(st):
     docker_command_str = (
         f"docker run --name {DOCKER_CONTAINER_NAME} --gpus=1 --rm --net=host "
         f"-v /mydata/Data/server/docs/examples/model_repository:/models "
-        f"nvcr.io/nvidia/tritonserver:25.02-py3 "
+        f"nvcr.io/nvidia/tritonserver:25.05-py3 "
         f"tritonserver --model-repository=/models --model-control-mode explicit --load-model densenet_onnx"
     )
     docker_command_list = docker_command_str.split()
