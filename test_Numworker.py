@@ -142,7 +142,7 @@ def train():
 
     # Adjust workers and batch size based on whether a GPU is used
     num_dataloader_workers = 32 if device.type == 'cuda' else 0
-    batch_size = 64 if device.type == 'cuda' else 32
+    batch_size = 96 if device.type == 'cuda' else 32
     print(f"[TRAIN] DataLoader using num_workers={num_dataloader_workers}, batch_size={batch_size}")
 
     train_loader = DataLoader(
