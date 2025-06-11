@@ -189,6 +189,8 @@ def train(st):
 
             for i, (inputs, labels) in enumerate(train_loader):
                 if not running: break
+                
+                inputs, labels = inputs.to(device), labels.to(device)
 
                 end_time_moving = time.time()
                 if i == 0:
@@ -196,8 +198,6 @@ def train(st):
                 if start_epoch == epoch and i == 0:
                     END_TIME_I2T = time.time()
                     print(f"Fully I2T took {END_TIME_I2T - st:.2f}s")
-
-                inputs, labels = inputs.to(device), labels.to(device)
 
                 optimizer.zero_grad()
                 outputs = model(inputs)
