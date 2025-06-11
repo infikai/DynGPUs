@@ -125,7 +125,8 @@ def train(st):
     end_time_loadCP = time.time()
     print(f"Loading checkpoint took {end_time_loadCP-start_time_loadCP}s")
 
-    model.train()
+    # model.train()
+
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -184,6 +185,8 @@ def train(st):
     print(f"fully starting training job took {end_time_training_init - start_time_training_init:.2f}s")
 
     try:
+        model.train()
+
         for epoch in range(start_epoch, max_epochs):
             epoch_for_interrupt_save = epoch
             if not running: break
@@ -194,7 +197,7 @@ def train(st):
             start_time_moving = time.time()
 
             for i, (inputs, labels) in enumerate(train_loader):
-                #if not running: break
+                if not running: break
                 
                 inputs, labels = inputs.to(device), labels.to(device)
 
