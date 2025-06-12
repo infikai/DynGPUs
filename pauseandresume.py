@@ -110,7 +110,7 @@ def train(st):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[TRAIN PID {os.getpid()}] Using device: {device}")
 
-    model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1) # Removed PYTORCH_AVAILABLE check as it's guarded above
+    model = models.resnet50(weights=None)
     model.to(device)
 
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
