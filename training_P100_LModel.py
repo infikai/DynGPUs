@@ -34,7 +34,7 @@ def get_imagenet_dataloaders(data_dir, batch_size, num_workers):
         ]))
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,  # Use shuffle for single GPU
+        train_dataset, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=True)
 
     val_loader = torch.utils.data.DataLoader(
@@ -69,7 +69,7 @@ def main():
     model_reading_start = time.time()
     model = models.regnet_y_128gf(weights=None)
     model_reading_end = time.time()
-    print(f'Model to Device Time: {model_reading_end - model_reading_start:.2f}s')
+    print(f'Model reading Time: {model_reading_end - model_reading_start:.2f}s')
 
     model_toD_start = time.time()
     model.to(device)
@@ -91,6 +91,7 @@ def main():
     print(f"Physical batch size: {args.batch_size}")
     print(f"Gradient accumulation steps: {args.accumulation_steps}")
     print(f"Effective batch size: {effective_batch_size}")
+    print(f"Number of data loading workers: {args.workers}")
 
 
     # --- Training Loop ---
