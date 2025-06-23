@@ -90,7 +90,7 @@ def main():
 
     # --- Model Initialization ---
     device = torch.device(f"cuda:{local_rank}")
-    model = models.vit_l_16(weights=None)
+    model = models.vit_l_32(weights=None)
     model.to(device)
     
     # Wrap the model with DDP.
