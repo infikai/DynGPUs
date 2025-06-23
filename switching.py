@@ -110,7 +110,7 @@ def train(st):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[TRAIN PID {os.getpid()}] Using device: {device}")
 
-    model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1) # Removed PYTORCH_AVAILABLE check as it's guarded above
+    model = models.regnet_y_128gf(weights=None)
     model.to(device)
 
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
@@ -161,7 +161,7 @@ def train(st):
     print(f"[TRAIN PID {os.getpid()}] Successfully loaded {len(train_dataset)} images from ImageNet training set.")
 
     num_dataloader_workers = 32 if device.type == 'cuda' else 0
-    batch_size = 64 if device.type == 'cuda' else 32
+    batch_size = 2 if device.type == 'cuda' else 32
     print(f"[TRAIN PID {os.getpid()}] DataLoader using num_workers={num_dataloader_workers}, batch_size={batch_size}")
     start_time_data_loader = time.time()
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_dataloader_workers, pin_memory=True if device.type == 'cuda' else False)
