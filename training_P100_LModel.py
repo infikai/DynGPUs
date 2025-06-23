@@ -92,8 +92,11 @@ def main():
         model.train()
         optimizer.zero_grad() # Zero gradients once at the start of the accumulation phase
 
+        enumerate_init_start = time.time()
         for i, (images, target) in enumerate(train_loader):
             batch_load_start = time.time()
+            if i == 0:
+                print(f'Enumerate init Time: {batch_load_start - enumerate_init_start:.2f}s')
             images = images.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             batch_load_time = (time.time() - batch_load_start) * 1000
