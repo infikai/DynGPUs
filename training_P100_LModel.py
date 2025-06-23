@@ -66,7 +66,11 @@ def main():
     print(f"Using device: {torch.cuda.get_device_name(0)}")
 
     # --- Model Initialization ---
+    model_reading_start = time.time()
     model = models.regnet_y_128gf(weights=None)
+    model_reading_end = time.time()
+    print(f'Model to Device Time: {model_reading_end - model_reading_start:.2f}s')
+
     model_toD_start = time.time()
     model.to(device)
     model_toD_end = time.time()
