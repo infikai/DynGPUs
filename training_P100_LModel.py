@@ -107,13 +107,16 @@ def main():
             train_step_start.record()
 
             # Use autocast for the forward pass
-            with autocast():
-                output = model(images)
-                # Normalize loss for accumulation
-                loss = criterion(output, target) / args.accumulation_steps
+            # with autocast():
+            #     output = model(images)
+            #     # Normalize loss for accumulation
+            #     loss = criterion(output, target) / args.accumulation_steps
+            output = model(images)
+            loss = criterion(output, target) / args.accumulation_steps
 
             # Scale the loss and call backward() to create scaled gradients
-            scaler.scale(loss).backward()
+            # scaler.scale(loss).backward()
+            loss.backward()
             
             # --- Gradient Accumulation Step ---
             # Update weights only after accumulating gradients for accumulation_steps
@@ -132,7 +135,7 @@ def main():
 
 
             train_step_end.record()
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
 
             if i % args.print_freq == 0:
                 train_time = train_step_start.elapsed_time(train_step_end)
