@@ -70,14 +70,14 @@ def main():
     model_toD_start = time.time()
     model.to(device)
     model_toD_end = time.time()
-    print(f'Model to Device Time: {model_toD_start - model_toD_end:.2f}s')
+    print(f'Model to Device Time: {model_toD_end - model_toD_start:.2f}s')
 
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
     # Initialize GradScaler for mixed precision training
-    scaler = GradScaler()
+    # scaler = GradScaler()
 
     # --- Data Loading ---
     train_loader, _ = get_imagenet_dataloaders(args.data_dir, args.batch_size, args.workers)
