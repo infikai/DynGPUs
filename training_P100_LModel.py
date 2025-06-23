@@ -135,7 +135,7 @@ def main():
 
 
             train_step_end.record()
-            # torch.cuda.synchronize()
+            torch.cuda.synchronize()
 
             if i % args.print_freq == 0:
                 train_time = train_step_start.elapsed_time(train_step_end)
