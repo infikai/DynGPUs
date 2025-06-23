@@ -159,7 +159,7 @@ def main():
                 'state_dict': model.state_dict(), # No .module here
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
-                'scaler': scaler.state_dict(), # Save the scaler state
+                # 'scaler': scaler.state_dict(), # Save the scaler state
             }, f'checkpoint_epoch_{epoch+1}.pth.tar')
             checkpoint_time = (time.time() - checkpoint_start) * 1000
             print(f"Epoch {epoch+1} checkpoint saved. Time taken: {checkpoint_time:.2f}ms")
