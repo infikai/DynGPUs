@@ -160,7 +160,7 @@ def train(st):
 
     print(f"[TRAIN PID {os.getpid()}] Successfully loaded {len(train_dataset)} images from ImageNet training set.")
 
-    num_dataloader_workers = 32 if device.type == 'cuda' else 0
+    num_dataloader_workers = 0 if device.type == 'cuda' else 0
     batch_size = 2 if device.type == 'cuda' else 32
     print(f"[TRAIN PID {os.getpid()}] DataLoader using num_workers={num_dataloader_workers}, batch_size={batch_size}")
     start_time_data_loader = time.time()
