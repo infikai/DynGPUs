@@ -67,7 +67,10 @@ def main():
 
     # --- Model Initialization ---
     model = models.regnet_y_128gf(weights=None)
+    model_toD_start = time.time()
     model.to(device)
+    model_toD_end = time.time()
+    print(f'Model to Device Time: {model_toD_start - model_toD_end:.2f}s')
 
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
@@ -122,14 +125,15 @@ def main():
             # Update weights only after accumulating gradients for accumulation_steps
             if (i + 1) % args.accumulation_steps == 0:
                 # Unscales the gradients of optimizer's assigned params in-place
-                scaler.unscale_(optimizer)
+                # scaler.unscale_(optimizer)
                 # Clip gradients to prevent exploding gradients
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 # scaler.step() first unscales the gradients of the optimizer's assigned params.
                 # If these gradients do not contain infs or NaNs, optimizer.step() is then called.
-                scaler.step(optimizer)
+                # scaler.step(optimizer)
+                optimizer.step()
                 # Updates the scale for next iteration.
-                scaler.update()
+                # scaler.update()
                 # Zero out the gradients for the next accumulation phase
                 optimizer.zero_grad()
 
