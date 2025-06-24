@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, models, transforms
-# Import Automatic Mixed Precision utilities
-from torch.cuda.amp import GradScaler, autocast
 
 def get_imagenet_dataloaders(data_dir, batch_size, num_workers):
     """Creates ImageNet dataloaders for training and validation."""
