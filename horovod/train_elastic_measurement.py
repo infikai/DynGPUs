@@ -78,48 +78,47 @@ def train(state):
     train_accuracy = Metric('train_accuracy')
 
     batch_offset = state.batch
-    with tqdm(total=len(train_loader),
-              desc='Train Epoch     #{}'.format(epoch + 1),
-              disable=not verbose) as t:
-        for idx, (data, target) in enumerate(train_loader):
-            # Elastic Horovod: update the current batch index this epoch
-            # and commit / check for host updates. Do not check hosts when
-            # we commit as it would be redundant.
-            state.batch = batch_idx = batch_offset + idx
-            if args.batches_per_commit > 0 and \
-                    state.batch % args.batches_per_commit == 0:
-                state.commit()
-            elif args.batches_per_host_check > 0 and \
-                    state.batch % args.batches_per_host_check == 0:
-                state.check_host_updates()
+    for idx, (data, target) in enumerate(train_loader):
+        # Elastic Horovod: update the current batch index this epoch
+        # and commit / check for host updates. Do not check hosts when
+        # we commit as it would be redundant.
+        state.batch = batch_idx = batch_offset + idx
+        if args.batches_per_commit > 0 and \
+                state.batch % args.batches_per_commit == 0:
+            state.commit()
+        elif args.batches_per_host_check > 0 and \
+                state.batch % args.batches_per_host_check == 0:
+            state.check_host_updates()
 
-            adjust_learning_rate(epoch, batch_idx)
+        adjust_learning_rate(epoch, batch_idx)
 
-            if args.cuda:
-                data, target = data.cuda(), target.cuda()
-            optimizer.zero_grad()
-            # Split data into sub-batches of size batch_size
-            for i in range(0, len(data), args.batch_size):
-                data_batch = data[i:i + args.batch_size]
-                target_batch = target[i:i + args.batch_size]
-                output = model(data_batch)
-                train_accuracy.update(accuracy(output, target_batch))
-                loss = F.cross_entropy(output, target_batch)
-                train_loss.update(loss)
-                # Average gradients among sub-batches
-                loss.div_(math.ceil(float(len(data)) / args.batch_size))
-                loss.backward()
+        if args.cuda:
+            data, target = data.cuda(), target.cuda()
+        optimizer.zero_grad()
+        # Split data into sub-batches of size batch_size
+        for i in range(0, len(data), args.batch_size):
+            data_batch = data[i:i + args.batch_size]
+            target_batch = target[i:i + args.batch_size]
+            output = model(data_batch)
+            train_accuracy.update(accuracy(output, target_batch))
+            loss = F.cross_entropy(output, target_batch)
+            train_loss.update(loss)
+            # Average gradients among sub-batches
+            loss.div_(math.ceil(float(len(data)) / args.batch_size))
+            loss.backward()
 
-            # Elastic Horovod: record which samples were processed this batch
-            # so we do not reprocess them if a reset event occurs
-            state.train_sampler.record_batch(idx, allreduce_batch_size)
+        # Elastic Horovod: record which samples were processed this batch
+        # so we do not reprocess them if a reset event occurs
+        state.train_sampler.record_batch(idx, allreduce_batch_size)
 
-            # Gradient is applied across all ranks
-            optimizer.step()
-            t.set_postfix({'loss': train_loss.avg.item(),
-                           'accuracy': 100. * train_accuracy.avg.item()})
+        # Gradient is applied across all ranks
+        optimizer.step()
 
-            t.update(1)
+        if i % 10 == 0:
+                    train_time = train_step_start.elapsed_time(train_step_end)
+                    print(f'Epoch: [{epoch + 1}][{i}/{len(train_loader)}]\t'
+                          f'Loss {loss.item():.4f}\t')
+
 
     if log_writer:
         log_writer.add_scalar('train/loss', train_loss.avg, epoch)
