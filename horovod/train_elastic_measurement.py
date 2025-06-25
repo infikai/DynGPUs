@@ -79,7 +79,9 @@ def train(state):
     train_accuracy = Metric('train_accuracy')
 
     batch_offset = state.batch
+    print(f'Epoch: {epoch}; Batch offset:{batch_offset}')
     for idx, (data, target) in enumerate(train_loader):
+        start_batch = time.time()
         # Elastic Horovod: update the current batch index this epoch
         # and commit / check for host updates. Do not check hosts when
         # we commit as it would be redundant.
@@ -118,14 +120,17 @@ def train(state):
         # so we do not reprocess them if a reset event occurs
         state.train_sampler.record_batch(idx, allreduce_batch_size)
 
+        start_op = time.time()
         # Gradient is applied across all ranks
         optimizer.step()
+        end_batch = time.time()
 
         if hvd.rank() == 0:
             if idx % 10 == 0:
                 print(f'Epoch: [{epoch + 1}][{idx}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
                 print(f'Data:{len(data)}')
+                print(f'Batch time: {end_batch - start_batch}s; Allreduce time: {end_batch - start_op}s')
 
 
     if log_writer:
