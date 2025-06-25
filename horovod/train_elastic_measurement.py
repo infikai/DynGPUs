@@ -11,6 +11,7 @@ import horovod.torch as hvd
 import os
 import math
 from tqdm import tqdm
+import time
 
 # Training settings
 parser = argparse.ArgumentParser(description='Elastic PyTorch ImageNet Example',
@@ -27,7 +28,7 @@ parser.add_argument('--checkpoint-format', default='./checkpoint-{epoch}.pth.tar
 # Horoovd settings
 parser.add_argument('--fp16-allreduce', action='store_true', default=False,
                     help='use fp16 compression during allreduce')
-parser.add_argument('--batches-per-allreduce', type=int, default=5,
+parser.add_argument('--batches-per-allreduce', type=int, default=1,
                     help='number of batches processed locally before '
                          'executing allreduce across workers; it multiplies '
                          'total batch size.')
@@ -85,10 +86,16 @@ def train(state):
         state.batch = batch_idx = batch_offset + idx
         if args.batches_per_commit > 0 and \
                 state.batch % args.batches_per_commit == 0:
+            start = time.time()
             state.commit()
+            end = time.time()
+            print(f'state commited! took {end - start}s')
         elif args.batches_per_host_check > 0 and \
                 state.batch % args.batches_per_host_check == 0:
+            start = time.time()
             state.check_host_updates()
+            end = time.time()
+            print(f'host update checked! took {end - start}s')
 
         adjust_learning_rate(epoch, batch_idx)
 
@@ -291,7 +298,10 @@ if __name__ == '__main__':
 
     # Set up standard ResNet-50 model.
     print(f"Initializing model: {args.model}")
+    start_model_loading = time.time()
     model = models.resnet50(weights=None) if args.model == 'resnet50' else models.vit_l_32(weights=None)
+    end_model_loading = time.time()
+    print(f"took: {end_model_loading - start_model_loading}s")
     # model = models.resnet50()
 
     # By default, Adasum doesn't need scaling up learning rate.
@@ -336,7 +346,7 @@ if __name__ == '__main__':
             checkpoint = torch.load(filepath)
             model.load_state_dict(checkpoint['model'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-
+    print('Loading State')
     state = hvd.elastic.TorchState(model=model,
                                    optimizer=optimizer,
                                    train_sampler=train_sampler,
