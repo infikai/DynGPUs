@@ -115,7 +115,6 @@ def train(state):
         optimizer.step()
 
         if i % 10 == 0:
-                    train_time = train_step_start.elapsed_time(train_step_end)
                     print(f'Epoch: [{epoch + 1}][{i}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
 
