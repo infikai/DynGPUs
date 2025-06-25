@@ -291,7 +291,7 @@ if __name__ == '__main__':
 
     # Set up standard ResNet-50 model.
     print(f"Initializing model: {args.model}")
-    model = models.resnet50(weights=None) if args.model == 'resnet50' else models.regnet_y_128gf(weights=None)
+    model = models.resnet50(weights=None) if args.model == 'resnet50' else models.vit_l_32(weights=None)
     # model = models.resnet50()
 
     # By default, Adasum doesn't need scaling up learning rate.
