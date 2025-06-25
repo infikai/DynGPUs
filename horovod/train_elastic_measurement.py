@@ -27,7 +27,7 @@ parser.add_argument('--checkpoint-format', default='./checkpoint-{epoch}.pth.tar
 # Horoovd settings
 parser.add_argument('--fp16-allreduce', action='store_true', default=False,
                     help='use fp16 compression during allreduce')
-parser.add_argument('--batches-per-allreduce', type=int, default=1,
+parser.add_argument('--batches-per-allreduce', type=int, default=5,
                     help='number of batches processed locally before '
                          'executing allreduce across workers; it multiplies '
                          'total batch size.')
