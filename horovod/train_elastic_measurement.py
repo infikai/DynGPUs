@@ -118,6 +118,7 @@ def train(state):
             if idx % 10 == 0:
                 print(f'Epoch: [{epoch + 1}][{idx}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
+                print(f'Data:{len(data)}')
 
 
     if log_writer:
