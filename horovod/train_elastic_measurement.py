@@ -114,8 +114,9 @@ def train(state):
         # Gradient is applied across all ranks
         optimizer.step()
 
-        if i % 10 == 0:
-                    print(f'Epoch: [{epoch + 1}][{i}/{len(train_loader)}]\t'
+        if hvd.rank() == 0:
+            if idx % 10 == 0:
+                print(f'Epoch: [{epoch + 1}][{idx}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
 
 
