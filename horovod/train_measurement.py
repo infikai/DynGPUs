@@ -58,7 +58,7 @@ def main():
 
     # Set model-specific defaults if not provided
     if args.batch_size is None:
-        args.batch_size = 1 if args.model == 'regnet_y_128gf' else 32
+        args.batch_size = 1 if args.model == 'regnet_y_128gf' else 64
             
     # Device Setup
     if not torch.cuda.is_available():

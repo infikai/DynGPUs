@@ -15,9 +15,9 @@ from tqdm import tqdm
 # Training settings
 parser = argparse.ArgumentParser(description='Elastic PyTorch ImageNet Example',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--train-dir', default=os.path.expanduser('~/imagenet/train'),
+parser.add_argument('--train-dir', default=os.path.expanduser('/mydata/Data/imagenet/train'),
                     help='path to training data')
-parser.add_argument('--val-dir', default=os.path.expanduser('~/imagenet/validation'),
+parser.add_argument('--val-dir', default=os.path.expanduser('/mydata/Data/imagenet/val'),
                     help='path to validation data')
 parser.add_argument('--log-dir', default='./logs',
                     help='tensorboard log directory')
@@ -47,6 +47,8 @@ parser.add_argument('--batches-per-host-check', type=int, default=10,
                          'as part of the commit process), but because still incurs some cost due '
                          'to broadcast, so we may not want to perform it every batch.')
 
+parser.add_argument('--model', type=str, default='regnet_y_128gf', choices=['resnet50', 'regnet_y_128gf'],
+                    help='Model architecture to train')
 # Default settings from https://arxiv.org/abs/1706.02677.
 parser.add_argument('--batch-size', type=int, default=32,
                     help='input batch size for training')
@@ -223,6 +225,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
+    if args.batch_size is None:
+        args.batch_size = 2 if args.model == 'regnet_y_128gf' else 64
+
     allreduce_batch_size = args.batch_size * args.batches_per_allreduce
 
     hvd.init()
@@ -285,7 +290,9 @@ if __name__ == '__main__':
         **kwargs)
 
     # Set up standard ResNet-50 model.
-    model = models.resnet50()
+    print(f"Initializing model: {args.model}")
+    model = models.resnet50(weights=None) if args.model == 'resnet50' else models.regnet_y_128gf(weights=None)
+    # model = models.resnet50()
 
     # By default, Adasum doesn't need scaling up learning rate.
     # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
@@ -338,3 +345,6 @@ if __name__ == '__main__':
                                    batch=0)
 
     full_train(state)
+
+# 
+# 
