@@ -47,7 +47,7 @@ parser.add_argument('--batches-per-host-check', type=int, default=10,
                          'as part of the commit process), but because still incurs some cost due '
                          'to broadcast, so we may not want to perform it every batch.')
 
-parser.add_argument('--model', type=str, default='regnet_y_128gf', choices=['resnet50', 'regnet_y_128gf'],
+parser.add_argument('--model', type=str, default='vit_l_32', choices=['resnet50', 'vit_l_32'],
                     help='Model architecture to train')
 # Default settings from https://arxiv.org/abs/1706.02677.
 parser.add_argument('--batch-size', type=int, default=32,
