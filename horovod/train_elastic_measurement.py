@@ -73,6 +73,7 @@ parser.add_argument('--seed', type=int, default=42,
 
 
 def train(state):
+    print('Train() been called')
     model.train()
     epoch = state.epoch
     train_loss = Metric('train_loss')
@@ -237,6 +238,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
+    start_main = time.time()
     if args.batch_size is None:
         args.batch_size = 2 if args.model == 'regnet_y_128gf' else 64
 
@@ -358,6 +360,8 @@ if __name__ == '__main__':
                                    val_sampler=val_sampler,
                                    epoch=resume_from_epoch,
                                    batch=0)
+    end_main = time.time()
+    print(f'Main function took: {end_main - start_main}s')
 
     full_train(state)
 
