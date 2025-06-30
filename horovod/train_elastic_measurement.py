@@ -42,7 +42,7 @@ parser.add_argument('--batches-per-commit', type=int, default=100,
                     help='number of batches processed before calling `state.commit()`; '
                          'commits prevent losing progress if an error occurs, but slow '
                          'down training.')
-parser.add_argument('--batches-per-host-check', type=int, default=10,
+parser.add_argument('--batches-per-host-check', type=int, default=1,
                     help='number of batches processed before calling `state.check_host_updates()`; '
                          'this check is very fast compared to state.commit() (which calls this '
                          'as part of the commit process), but because still incurs some cost due '
