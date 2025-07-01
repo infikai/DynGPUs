@@ -127,7 +127,6 @@ def train(state):
             if idx % 1 == 0:
                 print(f'Epoch: [{epoch + 1}][{idx}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
-                print(f'Data:{len(data)}')
                 print(f'Batch time: {end_batch - start_batch}s; Allreduce time: {end_batch - start_op}s')
 
 
