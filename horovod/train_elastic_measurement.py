@@ -73,7 +73,7 @@ parser.add_argument('--seed', type=int, default=42,
 
 
 def train(state):
-    print('Train() been called')
+    print(f'Train() been called in rank {hvd.rank()}')
     model.train()
     epoch = state.epoch
     train_loss = Metric('train_loss')
