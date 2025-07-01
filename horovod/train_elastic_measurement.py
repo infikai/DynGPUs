@@ -38,7 +38,7 @@ parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
                     help='apply gradient predivide factor in optimizer (default: 1.0)')
 
 # Elastic Horovod settings
-parser.add_argument('--batches-per-commit', type=int, default=100,
+parser.add_argument('--batches-per-commit', type=int, default=500,
                     help='number of batches processed before calling `state.commit()`; '
                          'commits prevent losing progress if an error occurs, but slow '
                          'down training.')
@@ -95,10 +95,7 @@ def train(state):
             print(f'state commited! took {end - start}s')
         elif args.batches_per_host_check > 0 and \
                 state.batch % args.batches_per_host_check == 0:
-            start = time.time()
             state.check_host_updates()
-            end = time.time()
-            print(f'host update checked! took {end - start}s')
 
         adjust_learning_rate(epoch, batch_idx)
 
@@ -127,7 +124,7 @@ def train(state):
         end_batch = time.time()
 
         if hvd.rank() == 0:
-            if idx % 10 == 0:
+            if idx % 1 == 0:
                 print(f'Epoch: [{epoch + 1}][{idx}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
                 print(f'Data:{len(data)}')
