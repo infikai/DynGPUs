@@ -109,6 +109,7 @@ def train(state):
         print(f'Move data to GPU time: {end_move - start_move}s')
         optimizer.zero_grad()
         # Split data into sub-batches of size batch_size
+        start_train = time.time()
         for i in range(0, len(data), args.batch_size):
             data_batch = data[i:i + args.batch_size]
             target_batch = target[i:i + args.batch_size]
@@ -119,6 +120,8 @@ def train(state):
             # Average gradients among sub-batches
             loss.div_(math.ceil(float(len(data)) / args.batch_size))
             loss.backward()
+        end_train = time.time()
+        print(f'Local train time: {end_train - start_train}s')
 
         # Elastic Horovod: record which samples were processed this batch
         # so we do not reprocess them if a reset event occurs
