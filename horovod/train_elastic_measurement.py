@@ -136,6 +136,8 @@ def train(state):
             if hvd.rank() == 0:    
                 print(f'Time: {time.time() - start_train}s')
             loss.backward()
+            if hvd.rank() == 0:    
+                print(f'Time: {time.time() - start_train}s')
         end_train = time.time()
         print(f'Local train time: {end_train - start_train}s')
 
