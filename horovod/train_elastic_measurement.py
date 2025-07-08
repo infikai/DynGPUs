@@ -113,31 +113,39 @@ def train(state):
         for i in range(0, len(data), args.batch_size):
             if hvd.rank() == 0:
                 print(f'Time: {time.time() - start_train}s')
+                int_train = time.time()
             data_batch = data[i:i + args.batch_size]
             if hvd.rank() == 0:
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
+                int_train = time.time()
             target_batch = target[i:i + args.batch_size]
             if hvd.rank() == 0:    
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
+                int_train = time.time()
             output = model(data_batch)
             if hvd.rank() == 0:    
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
+                int_train = time.time()
             train_accuracy.update(accuracy(output, target_batch))
             if hvd.rank() == 0:
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
+                int_train = time.time()
             loss = F.cross_entropy(output, target_batch)
             if hvd.rank() == 0:
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
+                int_train = time.time()
             train_loss.update(loss)
             if hvd.rank() == 0:
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
+                int_train = time.time()
             # Average gradients among sub-batches
             loss.div_(math.ceil(float(len(data)) / args.batch_size))
             if hvd.rank() == 0:    
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
+                int_train = time.time()
             loss.backward()
             if hvd.rank() == 0:    
-                print(f'Time: {time.time() - start_train}s')
+                print(f'Time: {time.time() - int_train}s')
         end_train = time.time()
         print(f'Local train time: {end_train - start_train}s')
 
@@ -267,7 +275,9 @@ if __name__ == '__main__':
 
     allreduce_batch_size = args.batch_size * args.batches_per_allreduce
 
+    start_hvdInit = time.time()
     hvd.init()
+    print(f'hvd init Time: {time.time() - start_hvdInit}s')
     torch.manual_seed(args.seed)
 
     if args.cuda:
