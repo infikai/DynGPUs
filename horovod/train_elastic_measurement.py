@@ -102,8 +102,11 @@ def train(state):
 
         adjust_learning_rate(epoch, batch_idx)
 
+        start_move = time.time()
         if args.cuda:
             data, target = data.cuda(), target.cuda()
+        end_move = time.time()
+        print(f'Move data to GPU time: {end_move - start_move}s')
         optimizer.zero_grad()
         # Split data into sub-batches of size batch_size
         for i in range(0, len(data), args.batch_size):
