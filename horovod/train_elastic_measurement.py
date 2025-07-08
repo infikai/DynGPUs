@@ -81,8 +81,10 @@ def train(state):
 
     batch_offset = state.batch
     print(f'Epoch: {epoch}; Batch offset:{batch_offset}')
+    start_init_loop = time.time()
     for idx, (data, target) in enumerate(train_loader):
         start_batch = time.time()
+        print(f'Init for loop time: {start_batch - start_init_loop}s')
         # Elastic Horovod: update the current batch index this epoch
         # and commit / check for host updates. Do not check hosts when
         # we commit as it would be redundant.
@@ -226,7 +228,7 @@ def full_train(state):
     while state.epoch < args.epochs:
         train(state)
         validate(state.epoch)
-        save_checkpoint(state.epoch)
+        # save_checkpoint(state.epoch)
         end_epoch(state)
 
 
