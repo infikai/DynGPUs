@@ -307,6 +307,7 @@ if __name__ == '__main__':
         kwargs['multiprocessing_context'] = 'forkserver'
     print(f'Worker init Time: {time.time() - start_workerInit}s')
 
+    start_Tdataset = time.time()
     train_dataset = \
         datasets.ImageFolder(args.train_dir,
                              transform=transforms.Compose([
@@ -316,13 +317,19 @@ if __name__ == '__main__':
                                  transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                                       std=[0.229, 0.224, 0.225])
                              ]))
+    print(f'Tdataset Time: {time.time() - start_Tdataset}s')
     # Elastic Horovod: use ElasticSampler to partition data among workers.
+    start_Tsampler = time.time()
     train_sampler = hvd.elastic.ElasticSampler(train_dataset)
+    print(f'Tsampler Time: {time.time() - start_Tsampler}s')
+
+    start_Tloader = time.time()
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=allreduce_batch_size,
         sampler=train_sampler,
         **kwargs)
+    print(f'Tloader Time: {time.time() - start_Tsampler}s')
 
     val_dataset = \
         datasets.ImageFolder(args.val_dir,
