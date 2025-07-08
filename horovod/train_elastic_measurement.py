@@ -365,6 +365,7 @@ if __name__ == '__main__':
             lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
     # Horovod: scale learning rate by the number of GPUs.
+    start_optim = time.time()
     optimizer = optim.SGD(model.parameters(),
                           lr=(args.base_lr *
                               lr_scaler),
@@ -380,6 +381,7 @@ if __name__ == '__main__':
         backward_passes_per_step=args.batches_per_allreduce,
         op=hvd.Adasum if args.use_adasum else hvd.Average,
         gradient_predivide_factor=args.gradient_predivide_factor)
+    print(f"Init optim took: {time.time() - start_optim}s")
 
     # Restore from a previous checkpoint, if initial_epoch is specified.
     # Horovod: restore on the first worker which will broadcast weights to other workers.
@@ -395,13 +397,15 @@ if __name__ == '__main__':
             checkpoint = torch.load(filepath)
             model.load_state_dict(checkpoint['model'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-    print('Loading State')
+    print('Creating State: ')
+    start_state = time.time()
     state = hvd.elastic.TorchState(model=model,
                                    optimizer=optimizer,
                                    train_sampler=train_sampler,
                                    val_sampler=val_sampler,
                                    epoch=resume_from_epoch,
                                    batch=0)
+    print(f"took: {time.time() - start_state}s")
     end_main = time.time()
     print(f'Main function took: {end_main - start_main}s')
 
