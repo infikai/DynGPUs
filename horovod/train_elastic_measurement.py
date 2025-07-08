@@ -84,7 +84,8 @@ def train(state):
     start_init_loop = time.time()
     for idx, (data, target) in enumerate(train_loader):
         start_batch = time.time()
-        print(f'Init for loop time: {start_batch - start_init_loop}s')
+        if idx == 0:
+            print(f'Init for loop time: {start_batch - start_init_loop}s')
         # Elastic Horovod: update the current batch index this epoch
         # and commit / check for host updates. Do not check hosts when
         # we commit as it would be redundant.
