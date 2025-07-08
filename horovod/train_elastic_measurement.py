@@ -111,22 +111,30 @@ def train(state):
         # Split data into sub-batches of size batch_size
         start_train = time.time()
         for i in range(0, len(data), args.batch_size):
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:
+                print(f'Time: {time.time() - start_train}s')
             data_batch = data[i:i + args.batch_size]
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:
+                print(f'Time: {time.time() - start_train}s')
             target_batch = target[i:i + args.batch_size]
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:    
+                print(f'Time: {time.time() - start_train}s')
             output = model(data_batch)
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:    
+                print(f'Time: {time.time() - start_train}s')
             train_accuracy.update(accuracy(output, target_batch))
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:
+                print(f'Time: {time.time() - start_train}s')
             loss = F.cross_entropy(output, target_batch)
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:
+                print(f'Time: {time.time() - start_train}s')
             train_loss.update(loss)
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:
+                print(f'Time: {time.time() - start_train}s')
             # Average gradients among sub-batches
             loss.div_(math.ceil(float(len(data)) / args.batch_size))
-            print(f'Time: {time.time() - start_train}s')
+            if hvd.rank() == 0:    
+                print(f'Time: {time.time() - start_train}s')
             loss.backward()
         end_train = time.time()
         print(f'Local train time: {end_train - start_train}s')
