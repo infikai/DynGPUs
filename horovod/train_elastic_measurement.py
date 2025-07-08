@@ -266,8 +266,10 @@ def full_train(state):
 
 
 if __name__ == '__main__':
+    start_args = time.time()
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+    print(f'Args Time: {time.time() - start_args}s')
 
     start_main = time.time()
     if args.batch_size is None:
@@ -296,12 +298,14 @@ if __name__ == '__main__':
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(4)
 
+    start_workerInit = time.time()
     kwargs = {'num_workers': 4, 'pin_memory': True} if args.cuda else {}
     # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
     # issues with Infiniband implementations that are not fork-safe
     if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
             mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
         kwargs['multiprocessing_context'] = 'forkserver'
+    print(f'Worker init Time: {time.time() - start_workerInit}s')
 
     train_dataset = \
         datasets.ImageFolder(args.train_dir,
