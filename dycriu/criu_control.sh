@@ -10,8 +10,6 @@
 # 3. The Python script 'dynamic_train.py' is in this directory.
 # ==============================================================================
 
-set -e # Exit immediately if a command exits with a non-zero status.
-
 # --- Configuration ---
 PYTHON_SCRIPT="dynamic_train.py"
 CONTROL_FILE="device.txt"
