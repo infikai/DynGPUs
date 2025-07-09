@@ -111,7 +111,7 @@ def check_and_update_device(model, optimizer):
             # =========================================================================
             
             # 1. Clear stale gradients from the GPU
-            optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad()
             
             # 2. Move model parameters to CPU
             model.to(target_device)
