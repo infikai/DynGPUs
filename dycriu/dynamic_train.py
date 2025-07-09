@@ -84,24 +84,37 @@ def check_and_update_device(model, optimizer):
         with open(args.device_control_file, 'r') as f:
             requested_device_str = f.read().strip().lower()
     except FileNotFoundError:
-        # If file doesn't exist, we don't do anything.
         return
 
-    # Determine the target device
     if requested_device_str == 'cpu':
         target_device = 'cpu'
     elif requested_device_str == 'gpu' and torch.cuda.is_available():
         target_device = f'cuda:{hvd.local_rank()}'
     else:
-        # Ignore invalid values in the file or if GPU is not available
         return
 
     if target_device != current_device:
-        print(f"Rank {hvd.rank()}: Device switch triggered! Moving from {current_device} to {target_device}")
-        # Move the model to the new device
+        print(f"Rank {hvd.rank()}: Device switch triggered! From {current_device} to {target_device}")
+
+        # ==============================================================================
+        # == MODIFICATION: ADDED TIMING FOR GPU -> CPU MOVE ==
+        # ==============================================================================
+        is_gpu_to_cpu_move = 'cuda' in current_device and target_device == 'cpu'
+        if is_gpu_to_cpu_move:
+            start_time = time.time()
+
+        # Perform the actual move
         model.to(target_device)
-        # Move the optimizer's state to the new device
         move_optimizer_state(optimizer, target_device)
+
+        if is_gpu_to_cpu_move:
+            end_time = time.time()
+            duration = end_time - start_time
+            print("======================================================================")
+            print(f"    ✅ GPU to CPU migration took: {duration:.4f} seconds")
+            print("======================================================================")
+        # ==============================================================================
+
         # Update the global device tracker
         current_device = target_device
 
