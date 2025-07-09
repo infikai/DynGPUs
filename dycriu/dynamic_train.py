@@ -108,6 +108,7 @@ def check_and_update_device(model, optimizer):
         move_optimizer_state(optimizer, target_device)
 
         if is_gpu_to_cpu_move:
+            torch.cuda.empty_cache()
             end_time = time.time()
             duration = end_time - start_time
             print("======================================================================")
