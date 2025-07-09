@@ -290,7 +290,7 @@ if __name__ == '__main__':
     log_writer = SummaryWriter(args.log_dir) if hvd.rank() == 0 else None
 
     torch.set_num_threads(4)
-    kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+    kwargs = {'num_workers': 0, 'pin_memory': True} if use_cuda else {}
     if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
             mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
         kwargs['multiprocessing_context'] = 'forkserver'
