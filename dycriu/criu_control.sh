@@ -32,12 +32,11 @@ echo "Setting initial state to GPU in $CONTROL_FILE"
 echo "gpu" > $CONTROL_FILE
 
 echo "Launching training on 1 GPU in the background..."
-# Launch on one process, redirecting all output to a log file
 horovodrun -np 1 python $PYTHON_SCRIPT --epochs 10 > $LOG_FILE 2>&1 &
 
-# Give it a moment to start and then find the Python process PID
 sleep 5
-TRAINING_PID=$(pgrep -f "$PYTHON_SCRIPT")
+# --- MODIFIED LINE: Ensure we only get the first PID ---
+TRAINING_PID=$(pgrep -f "$PYTHON_SCRIPT" | head -n 1)
 
 if [ -z "$TRAINING_PID" ]; then
     echo "ERROR: Could not find the training process PID."
@@ -54,7 +53,7 @@ sleep 30
 echo "Switching to CPU by updating $CONTROL_FILE"
 echo "cpu" > $CONTROL_FILE
 echo "Waiting 10 seconds for the process to stabilize on CPU..."
-sleep 10
+sleep 20
 echo "----------------------------------------"
 
 
@@ -77,8 +76,6 @@ echo "Waiting 5 seconds before restoring..."
 sleep 5
 
 echo ">>> RESTORING the process from the dump..."
-# The restore command itself is very fast; the process then continues.
-# We run it in the background (-d for detach) to let our control script finish.
 time sudo criu restore --images-dir $DUMP_DIR -d -j -v4 -o restore.log
 
 if [ $? -ne 0 ]; then
@@ -89,8 +86,7 @@ echo "----------------------------------------"
 
 
 # --- 6. Finalization ---
-# Find the new PID of the restored process
-RESTORED_PID=$(pgrep -f "$PYTHON_SCRIPT")
+RESTORED_PID=$(pgrep -f "$PYTHON_SCRIPT" | head -n 1)
 echo "✅ Process restored successfully!"
 echo "New PID is $RESTORED_PID."
 echo "Training is now continuing on the CPU."
