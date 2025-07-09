@@ -20,9 +20,9 @@ parser.add_argument('--device-control-file', default='device.txt',
                     help='File to control training device (gpu/cpu).')
 # --- END MODIFICATION ---
 
-parser.add_argument('--train-dir', default=os.path.expanduser('./imagenet/train'),
+parser.add_argument('--train-dir', default=os.path.expanduser('/mydata/Data/imagenet/train'),
                     help='path to training data')
-parser.add_argument('--val-dir', default=os.path.expanduser('./imagenet/val'),
+parser.add_argument('--val-dir', default=os.path.expanduser('/mydata/Data/imagenet/val'),
                     help='path to validation data')
 parser.add_argument('--log-dir', default='./logs',
                     help='tensorboard log directory')
