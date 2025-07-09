@@ -78,44 +78,57 @@ def move_optimizer_state(optimizer, device):
 
 # --- NEW: Function to check control file and switch device if needed ---
 def check_and_update_device(model, optimizer):
-    """Checks the device control file and moves model/optimizer if the device has changed."""
+    """
+    Checks the control file and performs a complete, synchronized device switch.
+    """
     global current_device
-    try:
-        with open(args.device_control_file, 'r') as f:
-            requested_device_str = f.read().strip().lower()
-    except FileNotFoundError:
-        return
+    
+    # Logic to decide and broadcast the target device (unchanged)
+    if hvd.rank() == 0:
+        try:
+            with open(args.device_control_file, 'r') as f:
+                target_device_str = f.read().strip().lower()
+        except FileNotFoundError:
+            target_device_str = 'gpu' if not args.no_cuda and torch.cuda.is_available() else 'cpu'
+    else:
+        target_device_str = None
+    target_device_str = hvd.broadcast_object(target_device_str, root_rank=0)
 
-    if requested_device_str == 'cpu':
-        target_device = 'cpu'
-    elif requested_device_str == 'gpu' and torch.cuda.is_available():
+    if target_device_str == 'gpu' and not args.no_cuda and torch.cuda.is_available():
         target_device = f'cuda:{hvd.local_rank()}'
     else:
-        return
+        target_device = 'cpu'
 
+    # Perform the switch if needed
     if target_device != current_device:
-        print(f"Rank {hvd.rank()}: Device switch triggered! From {current_device} to {target_device}")
-
-        # ==============================================================================
-        # == MODIFICATION: ADDED TIMING FOR GPU -> CPU MOVE ==
-        # ==============================================================================
+        print(f"Rank {hvd.rank()}: Syncing device! Moving from {current_device} to {target_device}")
+        
         is_gpu_to_cpu_move = 'cuda' in current_device and target_device == 'cpu'
+        
         if is_gpu_to_cpu_move:
-            start_time = time.time()
-
-        # Perform the actual move
-        model.to(target_device)
-        move_optimizer_state(optimizer, target_device)
-
-        if is_gpu_to_cpu_move:
+            # =========================================================================
+            # == THE COMPLETE 4-STEP GPU CLEANUP PROCEDURE ==
+            # =========================================================================
+            
+            # 1. Clear stale gradients from the GPU
+            optimizer.zero_grad(set_to_none=True)
+            
+            # 2. Move model parameters to CPU
+            model.to(target_device)
+            
+            # 3. Move optimizer state (e.g., momentum buffers) to CPU
+            move_optimizer_state(optimizer, target_device)
+            
+            # 4. Empty the cache of all unused memory blocks
             torch.cuda.empty_cache()
-            end_time = time.time()
-            duration = end_time - start_time
-            print("======================================================================")
-            print(f"    ✅ GPU to CPU migration took: {duration:.4f} seconds")
-            print("======================================================================")
-        # ==============================================================================
-
+            
+            print(f"Rank {hvd.rank()}: GPU cleanup complete.")
+            # =========================================================================
+        else:
+            # For CPU to GPU, the order is simpler
+            model.to(target_device)
+            move_optimizer_state(optimizer, target_device)
+            
         # Update the global device tracker
         current_device = target_device
 
