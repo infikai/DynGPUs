@@ -59,7 +59,7 @@ echo "----------------------------------------"
 echo ">>> DUMPING a CPU process (PID: $TRAINING_PID) using CRIU..."
 echo "This will terminate the process."
 
-time sudo criu dump -t $TRAINING_PID --images-dir $DUMP_DIR -j -v4 -o dump.log
+time sudo criu dump -t $TRAINING_PID --images-dir $DUMP_DIR -j --shmem-unmap -v4 -o dump.log
 
 if [ $? -ne 0 ]; then
     echo "ERROR: CRIU dump failed. Check dump.log for details."
