@@ -110,9 +110,9 @@ def train(state):
         end_move = time.time()
         # print(f'Move data to GPU time: {end_move - start_move}s')
         optimizer.zero_grad()
-        if args.sleep > 0 and idx == 0:
-            print(f'Sleep {args.sleep}s')
-            time.sleep(args.sleep)
+        # if args.sleep > 0 and idx == 0:
+        #     print(f'Sleep {args.sleep}s')
+        #     time.sleep(args.sleep)
         # Split data into sub-batches of size batch_size
         start_train = time.time()
         for i in range(0, len(data), args.batch_size):
@@ -148,6 +148,9 @@ def train(state):
             if hvd.rank() == 0 and idx == 0:    
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
+            if args.sleep > 0 and idx == 0:
+                print(f'Sleep {args.sleep}s')
+                time.sleep(args.sleep)
             loss.backward()
             if hvd.rank() == 0 and idx == 0:    
                 print(f'Time: {time.time() - int_train}s')
