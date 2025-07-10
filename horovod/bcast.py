@@ -70,7 +70,7 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--seed', type=int, default=42,
                     help='random seed')
-parser.add_argument('--sleep', type=int, default=10,
+parser.add_argument('--sleep', type=int, default=0,
                     help='sleep time')
 
 
@@ -337,7 +337,10 @@ if __name__ == '__main__':
         train_sampler = hvd.elastic.ElasticSampler(train_dataset)
     else:
         train_sampler = None
+    start_broadcast_sampler = time.time()
     train_sampler = hvd.broadcast_object(train_sampler, root_rank=0, name='train_sampler')
+    if hvd.rank() == 0:
+        print(f'Broadcast train_sampler Time: {time.time() - start_broadcast_sampler}s')
 
     # Create and broadcast loader from rank 0.
     # WARNING: This is not a standard practice and may fail or hang with num_workers > 0.
@@ -349,7 +352,10 @@ if __name__ == '__main__':
             **kwargs)
     else:
         train_loader = None
+    start_broadcast_loader = time.time()
     train_loader = hvd.broadcast_object(train_loader, root_rank=0, name='train_loader')
+    if hvd.rank() == 0:
+        print(f'Broadcast train_loader Time: {time.time() - start_broadcast_loader}s')
 
     # Let rank 0 create the validation dataset and broadcast it.
     if hvd.rank() == 0:
