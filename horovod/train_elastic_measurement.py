@@ -70,6 +70,8 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--seed', type=int, default=42,
                     help='random seed')
+parser.add_argument('--sleep', type=int, default=0,
+                    help='sleep time')
 
 
 def train(state):
@@ -108,43 +110,46 @@ def train(state):
         end_move = time.time()
         print(f'Move data to GPU time: {end_move - start_move}s')
         optimizer.zero_grad()
+        if args.sleep > 0 and idx == 0:
+            print(f'Sleep {args.sleep}s')
+            time.sleep(args.sleep)
         # Split data into sub-batches of size batch_size
         start_train = time.time()
         for i in range(0, len(data), args.batch_size):
-            if hvd.rank() == 0:
+            if hvd.rank() == 0 and idx == 0:
                 print(f'Time: {time.time() - start_train}s')
                 int_train = time.time()
             data_batch = data[i:i + args.batch_size]
-            if hvd.rank() == 0:
+            if hvd.rank() == 0 and idx == 0:
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
             target_batch = target[i:i + args.batch_size]
-            if hvd.rank() == 0:    
+            if hvd.rank() == 0 and idx == 0:    
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
             output = model(data_batch)
-            if hvd.rank() == 0:    
+            if hvd.rank() == 0 and idx == 0:    
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
             train_accuracy.update(accuracy(output, target_batch))
-            if hvd.rank() == 0:
+            if hvd.rank() == 0 and idx == 0:
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
             loss = F.cross_entropy(output, target_batch)
-            if hvd.rank() == 0:
+            if hvd.rank() == 0 and idx == 0:
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
             train_loss.update(loss)
-            if hvd.rank() == 0:
+            if hvd.rank() == 0 and idx == 0:
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
             # Average gradients among sub-batches
             loss.div_(math.ceil(float(len(data)) / args.batch_size))
-            if hvd.rank() == 0:    
+            if hvd.rank() == 0 and idx == 0:    
                 print(f'Time: {time.time() - int_train}s')
                 int_train = time.time()
             loss.backward()
-            if hvd.rank() == 0:    
+            if hvd.rank() == 0 and idx == 0:    
                 print(f'Time: {time.time() - int_train}s')
         end_train = time.time()
         print(f'Local train time: {end_train - start_train}s')
