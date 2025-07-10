@@ -108,7 +108,7 @@ def train(state):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
         end_move = time.time()
-        print(f'Move data to GPU time: {end_move - start_move}s')
+        # print(f'Move data to GPU time: {end_move - start_move}s')
         optimizer.zero_grad()
         if args.sleep > 0 and idx == 0:
             print(f'Sleep {args.sleep}s')
