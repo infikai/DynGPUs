@@ -416,7 +416,9 @@ if __name__ == '__main__':
 
     if args.cuda:
         # Move model to GPU.
+        start_move_model = time.time()
         model.cuda()
+        print(f'Move model to GPU Time: {time.time() - start_move_model}s')
         # If using GPU Adasum allreduce, scale learning rate by local_size.
         if args.use_adasum and hvd.nccl_built():
             lr_scaler = args.batches_per_allreduce * hvd.local_size()
