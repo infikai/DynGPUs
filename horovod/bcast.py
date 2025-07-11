@@ -398,9 +398,16 @@ if __name__ == '__main__':
     # Set up standard ResNet-50 model.
     print(f"Initializing model: {args.model}")
     start_model_loading = time.time()
-    model = models.resnet50(weights=None) if args.model == 'resnet50' else models.vit_l_32(weights=None)
+    if hvd.rank() == 0:
+        model = models.resnet50(weights=None) if args.model == 'resnet50' else models.vit_l_32(weights=None)
+    else:
+        model = None
     end_model_loading = time.time()
     print(f"took: {end_model_loading - start_model_loading}s")
+    start_broadcast_model = time.time()
+    model = hvd.broadcast_object(model, root_rank=0, name='model')
+    if hvd.rank() == 0:
+        print(f'Broadcast model Time: {time.time() - start_broadcast_model}s')
     # model = models.resnet50()
 
     # By default, Adasum doesn't need scaling up learning rate.
