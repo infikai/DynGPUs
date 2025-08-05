@@ -101,15 +101,15 @@ def main():
                     data_iterator = iter(loader)
                     
                     if active_set is None:
-                        hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters())
+                        hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
                     else:
-                        hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters(), process_set=active_set)
+                        hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters(), process_set=active_set)
                     
                     root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
                     
                     if hvd.rank() == root_rank_for_sync:
                         model_state = model.state_dict()
-                        opt_state = base_optimizer.state_dict()
+                        opt_state = hvd_optimizer.state_dict()
                     else:
                         model_state, opt_state = None, None
                     
@@ -124,7 +124,7 @@ def main():
 
                     if hvd.rank() != root_rank_for_sync:
                         model.load_state_dict(bcast_model_state)
-                        base_optimizer.load_state_dict(bcast_opt_state)
+                        hvd_optimizer.load_state_dict(bcast_opt_state)
 
                     # Fast-forward the new iterator to the correct batch
                     for _ in range(state.batch_idx):
