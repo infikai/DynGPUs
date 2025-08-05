@@ -51,6 +51,8 @@ def main():
     model = models.resnet50().cuda()
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     criterion = nn.CrossEntropyLoss().cuda()
+
+    process_set_cache = {}
     
     # --- 2. Main Training Controller ---
     while state.epoch < 100:
@@ -68,8 +70,16 @@ def main():
                 active_ranks = hvd.broadcast_object(active_ranks, root_rank=0, name="ranks_bcast")
 
                 current_active_ranks = active_ranks
-                hvd.remove_process_set()
-                active_set = hvd.add_process_set(current_active_ranks)
+                # Use a tuple of ranks as a key for our cache.
+                ranks_tuple = tuple(sorted(current_active_ranks))
+                if ranks_tuple not in process_set_cache:
+                    print(f"Rank {hvd.rank()}: Creating NEW process set for {ranks_tuple}")
+                    # Only call add_process_set for new configurations.
+                    process_set_cache[ranks_tuple] = hvd.add_process_set(current_active_ranks)
+                
+                # Retrieve the handle from the cache.
+                active_set = process_set_cache[ranks_tuple]
+
                 print(f"Rank {hvd.rank()}: Configuring for active ranks: {current_active_ranks}")
 
                 data_iterator = None
