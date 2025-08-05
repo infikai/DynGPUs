@@ -15,7 +15,9 @@ class TrainingState:
         self.batch_idx = 0
 
 def main():
-    hvd.init()
+    hvd.init(process_sets="dynamic")
+    hostname = socket.gethostname()
+    print(f'Node: {hostname} binded rank is {hvd.rank()}')
     torch.cuda.set_device(hvd.local_rank())
     model = models.resnet50().cuda()
     # Use a standard PyTorch optimizer. We will manage the gradient reduction manually.
@@ -126,6 +128,8 @@ def main():
                     # --- END FIX ---
                     
                     state.batch_idx += 1
+                    if hvd.rank() == current_active_ranks[0]:
+                        print(f"Epoch: {state.epoch} | Batch: {state.batch_idx-1} | Loss: {loss.item():.4f}")
                 except StopIteration:
                     break
             else:
