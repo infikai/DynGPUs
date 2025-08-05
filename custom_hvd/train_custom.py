@@ -177,11 +177,12 @@ def main():
             state.epoch += 1
             state.batch_idx = 0
 
-def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUS/custom_hvd/active_workers.txt'):
+def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/custom_hvd/active_workers.txt'):
     """Reads a comma-separated list of active ranks from the control file."""
     try:
         if not os.path.exists(filepath):
             time.sleep(1)
+            print('path not exist')
             if not os.path.exists(filepath): return list(range(hvd.size()))
         with open(filepath, 'r') as f:
             content = f.read().strip()
