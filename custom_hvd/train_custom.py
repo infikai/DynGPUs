@@ -95,7 +95,7 @@ def main():
                     local_rank = current_active_ranks.index(hvd.rank())
                     sampler = DistributedSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
                     sampler.set_epoch(state.epoch)
-                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, sampler=sampler)
+                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, sampler=sampler)
                     data_iterator = iter(loader)
                     # Fast-forward the new iterator to the correct batch
                     # To do: implement something like horovod distributed sampler which can record the processed indices.
@@ -136,6 +136,7 @@ def main():
             # --- Check for new config changes before every batch ---
             if hvd.rank() == 0:
                 new_ranks = read_active_ranks_from_file()
+                print(new_ranks)
             else:
                 new_ranks = None
             new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
