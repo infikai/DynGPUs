@@ -71,16 +71,23 @@ def main():
 
                 current_active_ranks = active_ranks
                 # Use a tuple of ranks as a key for our cache.
-                ranks_tuple = tuple(sorted(current_active_ranks))
-                if ranks_tuple not in process_set_cache:
-                    print(f"Rank {hvd.rank()}: Creating NEW process set for {ranks_tuple}")
-                    # Only call add_process_set for new configurations.
-                    process_set_cache[ranks_tuple] = hvd.add_process_set(current_active_ranks)
-                
-                # Retrieve the handle from the cache.
-                active_set = process_set_cache[ranks_tuple]
+                is_full_world = (len(current_active_ranks) == hvd.size())
 
-                print(f"Rank {hvd.rank()}: Configuring for active ranks: {current_active_ranks}")
+                if is_full_world:
+                    # Case 1: All workers are active. Use the default communicator.
+                    print(f"Rank {hvd.rank()}: Configuring for FULL WORLD.")
+                    active_set = None # None signifies the default "world" process set
+                else:
+                    # Case 2: A subset of workers is active. Safely create/get the subset.
+                    ranks_tuple = tuple(sorted(current_active_ranks))
+                    needs_creation_local = torch.tensor(1 if ranks_tuple not in process_set_cache else 0)
+                    needs_creation_sum = hvd.allreduce(needs_creation_local, name=f"creation_lock_{ranks_tuple}")
+
+                    if needs_creation_sum.item() > 0:
+                        print(f"Rank {hvd.rank()}: Synchronized decision to create NEW process set for {ranks_tuple}")
+                        process_set_cache[ranks_tuple] = hvd.add_process_set(current_active_ranks)
+                    
+                    active_set = process_set_cache[ranks_tuple]
 
                 data_iterator = None
                 if hvd.rank() in current_active_ranks:
