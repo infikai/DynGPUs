@@ -145,7 +145,7 @@ def main():
                 except StopIteration:
                     break
             else:
-                model.cpu()
+                # model.cpu()
                 torch.cuda.empty_cache()
                 time.sleep(1)
 
