@@ -75,12 +75,18 @@ def main():
                     ST_bcast = time.time()
                     if active_set is None:
                         bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, name="BcastModel")
+                        print(f'BCAST1 cost: {time.time() - ST_bcast}s')
                         bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, name="BcastOpt")
+                        print(f'BCAST2 cost: {time.time() - ST_bcast}s')
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
+                        print(f'BCAST3 cost: {time.time() - ST_bcast}s')
                     else:
                         bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
+                        print(f'BCAST1 cost: {time.time() - ST_bcast}s')
                         bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
+                        print(f'BCAST2 cost: {time.time() - ST_bcast}s')
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
+                        print(f'BCAST3 cost: {time.time() - ST_bcast}s')
                     print(f'BCAST cost: {time.time() - ST_bcast}s')
 
                     if hvd.rank() != root_rank_for_sync:
