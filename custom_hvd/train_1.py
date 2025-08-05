@@ -8,6 +8,7 @@ import horovod.torch as hvd
 import time
 import os
 from torch.utils.data.distributed import DistributedSampler
+import socket
 
 class TrainingState:
     def __init__(self):
