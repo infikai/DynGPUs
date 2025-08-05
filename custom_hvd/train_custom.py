@@ -114,12 +114,18 @@ def main():
                         model_state, opt_state = None, None
                     
                     if active_set is None:
+                        print('bcast_model')
                         bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync)
+                        print('bcast_opt')
                         bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync)
+                        print('bcast_state')
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync)
                     else:
+                        print('bcast_model')
                         bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set)
+                        print('bcast_opt')
                         bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set)
+                        print('bcast_state')
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set)
 
                     if hvd.rank() != root_rank_for_sync:
