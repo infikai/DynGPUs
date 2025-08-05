@@ -118,11 +118,16 @@ def main():
                     model_state = None
                     opt_state = None
                 
-                # Broadcast the state dictionary objects
-                bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
-                bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
+                # Conditionally call broadcast_object to avoid passing process_set=None
+                if active_set is None:
+                    bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, name="BcastModel")
+                    bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, name="BcastOpt")
+                    state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="state_bcast")
+                else:
+                    bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
+                    bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
+                    state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="state_bcast", process_set=active_set)
 
-                # Load the state on non-root ranks
                 if hvd.rank() != root_rank_for_sync:
                     model.load_state_dict(bcast_model_state)
                     optimizer.load_state_dict(bcast_opt_state)
