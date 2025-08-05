@@ -41,6 +41,7 @@ def main():
         
         while True:
             if config_changed:
+                ST_config = time.time()
                 # This logic for determining the active set remains the same
                 if hvd.rank() == 0:
                     active_ranks = read_active_ranks_from_file()
@@ -71,7 +72,7 @@ def main():
                         opt_state = base_optimizer.state_dict()
                     else:
                         model_state, opt_state = None, None
-                    
+                    ST_bcast = time.time()
                     if active_set is None:
                         bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, name="BcastModel")
                         bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, name="BcastOpt")
@@ -80,6 +81,7 @@ def main():
                         bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
                         bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
+                    print(f'BCAST cost: {time.time() - ST_bcast}s)
 
                     if hvd.rank() != root_rank_for_sync:
                         model.load_state_dict(bcast_model_state)
@@ -93,7 +95,7 @@ def main():
                     data_iterator = iter(loader)
                     for _ in range(state.batch_idx):
                         next(data_iterator)
-                
+                print(f'Config Change Cost: {time.time() - ST_config}s')
                 config_changed = False
 
             if hvd.rank() == 0:
