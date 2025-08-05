@@ -102,10 +102,19 @@ def main():
                     for _ in range(state.batch_idx):
                         next(data_iterator)
 
-                hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters(), process_set=active_set)
-                hvd.broadcast_parameters(model.state_dict(), root_rank=current_active_ranks[0], process_set=active_set)
-                hvd.broadcast_optimizer_state(optimizer, root_rank=current_active_ranks[0], process_set=active_set)
-                state = hvd.broadcast_object(state, root_rank=current_active_ranks[0], name="state_bcast", process_set=active_set)
+                # Conditionally create the optimizer to avoid passing process_set=None
+                if active_set is None:
+                    # Full world case: Omit the process_set argument entirely
+                    hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
+                else:
+                    # Subset case: Pass the specific process_set
+                    hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters(), process_set=active_set)
+                # --- END FIX ---
+
+                root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
+                hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
+                hvd.broadcast_optimizer_state(optimizer, root_rank=root_rank_for_sync, process_set=active_set)
+                state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="state_bcast", process_set=active_set)
                 config_changed = False
 
             # --- Check for new config changes before every batch ---
