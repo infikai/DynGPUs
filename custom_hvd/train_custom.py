@@ -18,7 +18,7 @@ class TrainingState:
 
 def main():
     # --- 1. Boilerplate Setup ---
-    hvd.init()
+    hvd.init(process_sets="dynamic")
     hostname = socket.gethostname()
     print(f'Node: {hostname} binded rank is {hvd.rank()}')
     torch.cuda.set_device(hvd.local_rank())
