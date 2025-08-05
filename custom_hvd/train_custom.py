@@ -91,46 +91,44 @@ def main():
 
                 data_iterator = None
                 if hvd.rank() in current_active_ranks:
-                    # Assign rank number by the index in active rank list
+                    data_iterator = None
                     local_rank = current_active_ranks.index(hvd.rank())
-                    sampler = DistributedSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
+                    num_replicas = len(current_active_ranks)
+                    
+                    sampler = DistributedSampler(train_dataset, num_replicas=num_replicas, rank=local_rank)
                     sampler.set_epoch(state.epoch)
-                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, sampler=sampler)
+                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, num_workers=4, sampler=sampler)
                     data_iterator = iter(loader)
+                    
+                    if active_set is None:
+                        hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters())
+                    else:
+                        hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters(), process_set=active_set)
+                    
+                    root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
+                    
+                    if hvd.rank() == root_rank_for_sync:
+                        model_state = model.state_dict()
+                        opt_state = base_optimizer.state_dict()
+                    else:
+                        model_state, opt_state = None, None
+                    
+                    if active_set is None:
+                        bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync)
+                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync)
+                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync)
+                    else:
+                        bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set)
+                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set)
+                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set)
+
+                    if hvd.rank() != root_rank_for_sync:
+                        model.load_state_dict(bcast_model_state)
+                        base_optimizer.load_state_dict(bcast_opt_state)
+
                     # Fast-forward the new iterator to the correct batch
-                    # To do: implement something like horovod distributed sampler which can record the processed indices.
                     for _ in range(state.batch_idx):
                         next(data_iterator)
-
-                # Conditionally create the optimizer to avoid passing process_set=None
-                if active_set is None:
-                    # Full world case: Omit the process_set argument entirely
-                    hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
-                else:
-                    # Subset case: Pass the specific process_set
-                    hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters(), process_set=active_set)
-
-                root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
-                if hvd.rank() == root_rank_for_sync:
-                    model_state = model.state_dict()
-                    opt_state = optimizer.state_dict()
-                else:
-                    model_state = None
-                    opt_state = None
-                
-                # Conditionally call broadcast_object to avoid passing process_set=None
-                if active_set is None:
-                    bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, name="BcastModel")
-                    bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, name="BcastOpt")
-                    state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="state_bcast")
-                else:
-                    bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
-                    bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
-                    state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="state_bcast", process_set=active_set)
-
-                if hvd.rank() != root_rank_for_sync:
-                    model.load_state_dict(bcast_model_state)
-                    optimizer.load_state_dict(bcast_opt_state)
                 config_changed = False
 
             # --- Check for new config changes before every batch ---
