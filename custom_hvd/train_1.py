@@ -93,8 +93,10 @@ def main():
                     sampler.set_epoch(state.epoch)
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, num_workers=4, sampler=sampler)
                     data_iterator = iter(loader)
+                    ST_fast_forward = time.time()
                     for _ in range(state.batch_idx):
                         next(data_iterator)
+                    print(f'Fast froward cost: {time.time() - ST_fast_forward}s')
                 print(f'Config Change Cost: {time.time() - ST_config}s')
                 config_changed = False
 
