@@ -68,6 +68,7 @@ def main():
                 active_ranks = hvd.broadcast_object(active_ranks, root_rank=0, name="ranks_bcast")
 
                 current_active_ranks = active_ranks
+                hvd.remove_process_set()
                 active_set = hvd.add_process_set(current_active_ranks)
                 print(f"Rank {hvd.rank()}: Configuring for active ranks: {current_active_ranks}")
 
