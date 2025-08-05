@@ -114,19 +114,13 @@ def main():
                         model_state, opt_state = None, None
                     
                     if active_set is None:
-                        print('bcast_model')
-                        bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync)
-                        print('bcast_opt')
-                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync)
-                        print('bcast_state')
-                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync)
+                        bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, name="BcastModel")
+                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, name="BcastOpt")
+                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
                     else:
-                        print('bcast_model')
-                        bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set)
-                        print('bcast_opt')
-                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set)
-                        print('bcast_state')
-                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set)
+                        bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
+                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
+                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
 
                     if hvd.rank() != root_rank_for_sync:
                         model.load_state_dict(bcast_model_state)
