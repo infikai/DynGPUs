@@ -137,6 +137,7 @@ def main():
                     break
             else:
                 model.cpu()
+                torch.cuda.empty_cache()
                 time.sleep(1)
 
         if not config_changed:
