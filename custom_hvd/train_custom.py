@@ -109,12 +109,23 @@ def main():
                 else:
                     # Subset case: Pass the specific process_set
                     hvd_optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters(), process_set=active_set)
-                # --- END FIX ---
 
                 root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
-                hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
-                hvd.broadcast_optimizer_state(optimizer, root_rank=root_rank_for_sync, process_set=active_set)
-                state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="state_bcast", process_set=active_set)
+                if hvd.rank() == root_rank_for_sync:
+                    model_state = model.state_dict()
+                    opt_state = optimizer.state_dict()
+                else:
+                    model_state = None
+                    opt_state = None
+                
+                # Broadcast the state dictionary objects
+                bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
+                bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
+
+                # Load the state on non-root ranks
+                if hvd.rank() != root_rank_for_sync:
+                    model.load_state_dict(bcast_model_state)
+                    optimizer.load_state_dict(bcast_opt_state)
                 config_changed = False
 
             # --- Check for new config changes before every batch ---
