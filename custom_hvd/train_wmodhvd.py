@@ -81,13 +81,13 @@ def main():
                             # model_state = model.state_dict()
                             opt_state = base_optimizer.state_dict()
                         else:
-                            model_state, opt_state = None, None
+                            opt_state = None
 
                         # bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
                         bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
                         
                         if hvd.rank() != root_rank_for_sync:
-                            model.load_state_dict(bcast_model_state)
+                            # model.load_state_dict(bcast_model_state)
                             base_optimizer.load_state_dict(bcast_opt_state)
 
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
