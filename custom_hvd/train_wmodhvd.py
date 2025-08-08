@@ -118,6 +118,7 @@ def main():
 
             if hvd.rank() in current_active_ranks:
                 try:
+                    ST_batch = time.time()
                     images, target = next(data_iterator)
                     model.cuda()
                     images, target = images.cuda(), target.cuda()
@@ -125,20 +126,24 @@ def main():
                     base_optimizer.zero_grad()
                     output = model(images)
                     loss = criterion(output, target)
+                    
                     loss.backward()
-
                     # --- FIX: Manual Gradient Allreduce ---
                     # Loop over all model parameters and average their gradients.
+                    ST_grad = time.time()
                     for i, param in enumerate(model.parameters()):
                         if param.grad is not None:
                             if active_set is None:
                                 hvd.allreduce_(param.grad, average=True, name=f"grad_{i}")
                             else:
                                 hvd.allreduce_(param.grad, average=True, process_set=active_set, name=f"grad_{i}")
-                    
-                    # Step the optimizer with the averaged gradients
+                    print(f'grad allreduce Cost: {time.time() - ST_grad}s')
+                    # Step the optimizer with the averaged gradient
+                    ST_step = time.time()
                     base_optimizer.step()
+                    print(f'op.step() Cost: {time.time() - ST_step}s')
                     # --- END FIX ---
+                    print(f'One Batch Cost: {time.time() - ST_batch}s')
                     
                     state.batch_idx += 1
                     if hvd.rank() == current_active_ranks[0]:
@@ -146,7 +151,7 @@ def main():
                 except StopIteration:
                     break
             else:
-                # model.cpu()
+                model.cpu()
                 torch.cuda.empty_cache()
                 time.sleep(1)
 
