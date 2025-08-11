@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import torchvision.models as models
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -23,7 +24,7 @@ def main():
     model = models.resnet50().cuda()
     # Use a standard PyTorch optimizer. We will manage the gradient reduction manually.
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    criterion = nn.CrossEntropyLoss().cuda()
+    # criterion = nn.CrossEntropyLoss().cuda()
     train_dataset = datasets.ImageFolder(
         os.path.join('/mydata/Data/imagenet', 'train'),
         transform=transforms.Compose([
@@ -120,13 +121,12 @@ def main():
                 try:
                     ST_batch = time.time()
                     images, target = next(data_iterator)
-                    model.cuda()
+                    # model.cuda()
                     images, target = images.cuda(), target.cuda()
 
                     base_optimizer.zero_grad()
                     output = model(images)
-                    loss = criterion(output, target)
-                    
+                    loss = F.cross_entropy(output, target)
                     loss.backward()
                     # --- FIX: Manual Gradient Allreduce ---
                     # Loop over all model parameters and average their gradients.
