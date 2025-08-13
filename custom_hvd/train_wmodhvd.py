@@ -138,7 +138,15 @@ def main():
                     ST_grad = time.time()
                     print('allreduce:')
                     print(active_set)
-                    allreduce_gradients_manual(model, active_set)
+                    if active_set is None:
+                        allreduce_name = "grads_full_world"
+                    else:
+                        # Create a name unique to this specific subset of ranks
+                        ranks_str = "_".join(map(str, sorted(current_active_ranks)))
+                        allreduce_name = f"grads_set_{ranks_str}"
+
+                    # Pass the unique name to our helper function
+                    allreduce_gradients_manual(model, active_set, name=allreduce_name)
                     # for i, param in enumerate(model.parameters()):
                     #     if param.grad is not None:
                     #         if active_set is None:
@@ -181,26 +189,23 @@ def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/custom_hvd/active
         print(f"Error reading file: {e}. Defaulting to all ranks.")
         return list(range(hvd.size()))
 
-def allreduce_gradients_manual(model, process_set):
+def allreduce_gradients_manual(model, process_set, name):
     """
-    Manually performs a single, fused allreduce on all of a model's gradients.
+    Manually performs a single, fused allreduce on all of a model's gradients
+    using a provided unique name for the operation.
     """
-    # 1. Get a list of all parameters that have gradients
     params_with_grad = [p for p in model.parameters() if p.grad is not None]
     if not params_with_grad:
         return
 
-    # 2. Flatten all gradients into a single, contiguous tensor.
     flat_grads = torch.cat([p.grad.view(-1) for p in params_with_grad])
-    print('flat')
 
-    # 3. Perform a single allreduce on this large tensor.
-    if process_set is None: # Full world case
-        hvd.allreduce_(flat_grads, average=True)
-    else: # Subset case
-        hvd.allreduce_(flat_grads, average=True, process_set=process_set)
-    print('all')
-    # 4. Un-flatten the averaged gradients back into the original parameters.
+    # Pass the unique name to the allreduce call
+    if process_set is None:
+        hvd.allreduce_(flat_grads, average=True, name=name)
+    else:
+        hvd.allreduce_(flat_grads, average=True, process_set=process_set, name=name)
+
     offset = 0
     for p in params_with_grad:
         numel = p.grad.numel()
