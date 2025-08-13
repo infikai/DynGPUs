@@ -50,7 +50,7 @@ class MyElasticSampler(torch.utils.data.Sampler):
         self.epoch = 0
         self.processed_indices = set()
 
-        self.num_replicas = 0
+        self.num_replicas = 1
         self.rank = 0
         self.remaining_indices = []
         self.num_samples = 0
