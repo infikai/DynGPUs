@@ -9,7 +9,7 @@ import time
 import os
 from torch.utils.data.distributed import DistributedSampler
 import socket
-from samplerimport MyElasticSampler
+from sampler import MyElasticSampler
 
 class TrainingState:
     def __init__(self):
