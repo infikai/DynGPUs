@@ -22,7 +22,7 @@ import torch.utils.data.distributed
 from horovod.torch.mpi_ops import rank, size
 
 
-class ElasticSampler(torch.utils.data.Sampler):
+class MyElasticSampler(torch.utils.data.Sampler):
     """Sampler that partitions dataset across ranks and repartitions after reset events.
 
     Works similar to `DistributedSampler`, but with an optional capability to record
