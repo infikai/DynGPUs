@@ -71,12 +71,14 @@ def main():
                     root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
                     ST_bcast = time.time()
                     if is_full_world:
+                        print('full world case')
                         # Case 1: All workers active. Use the efficient built-in functions.
                         hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
                         hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
-                        print(f'BCAST cost: {time.time() - ST_bcast}s')
+                        print(f'fBCAST cost: {time.time() - ST_bcast}s')
                     else:
+                        print('partial world case')
                         # Case 2: A subset is active. Use the manual object broadcast.
                         hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
                         if hvd.rank() == root_rank_for_sync:
@@ -93,7 +95,7 @@ def main():
                             base_optimizer.load_state_dict(bcast_opt_state)
 
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
-                        print(f'BCAST cost: {time.time() - ST_bcast}s')
+                        print(f'pBCAST cost: {time.time() - ST_bcast}s')
 
                     # Data loader setup remains the same
                     local_rank = current_active_ranks.index(hvd.rank())
@@ -112,8 +114,8 @@ def main():
                 new_ranks = read_active_ranks_from_file()
             else:
                 new_ranks = None
-            print(f'updating active rank on {hvd.rank()}')
             new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
+            print(f'updated active rank on {hvd.rank()}')
 
             if new_ranks != current_active_ranks:
                 config_changed = True
@@ -121,6 +123,7 @@ def main():
 
             if hvd.rank() in current_active_ranks:
                 try:
+                    print('Training:')
                     ST_batch = time.time()
                     images, target = next(data_iterator)
                     images, target = images.cuda(), target.cuda()
