@@ -42,7 +42,7 @@ class MyElasticSampler(torch.utils.data.Sampler):
         seed: Random seed used to shuffle the sampler when `shuffle=True`.
               This number should be identical across all ranks (default: 0).
     """
-    def __init__(self, dataset, shuffle=True, seed=0, num_replicas=num_replicas, rank=rank):
+    def __init__(self, dataset, shuffle=True, seed=0):
         self.dataset = dataset
         self.shuffle = shuffle
         self.seed = seed
@@ -50,8 +50,8 @@ class MyElasticSampler(torch.utils.data.Sampler):
         self.epoch = 0
         self.processed_indices = set()
 
-        self.num_replicas = num_replicas
-        self.rank = rank
+        self.num_replicas = 0
+        self.rank = 0
         self.remaining_indices = []
         self.num_samples = 0
         self.total_size = 0
@@ -59,7 +59,7 @@ class MyElasticSampler(torch.utils.data.Sampler):
 
         self.reset()
 
-    def set_epoch(self, epoch, processed_num):
+    def set_epoch(self, epoch, processed_num, num_replicas, rank):
         """Sets the epoch for this sampler.
 
         When `shuffle=True`, this ensures all replicas use a different random ordering
@@ -74,6 +74,8 @@ class MyElasticSampler(torch.utils.data.Sampler):
         """
         self.epoch = epoch
         self.processed_num = processed_num
+        self.num_replicas = num_replicas
+        self.rank = rank
         self.reset()
 
     def record_batch(self, batch_idx, batch_size):

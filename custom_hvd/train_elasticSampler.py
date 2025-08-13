@@ -9,7 +9,7 @@ import time
 import os
 from torch.utils.data.distributed import DistributedSampler
 import socket
-from sampler import MyElasticSampler
+from samplerimport MyElasticSampler
 
 class TrainingState:
     def __init__(self):
@@ -98,8 +98,8 @@ def main():
                     # Data loader setup remains the same
                     local_rank = current_active_ranks.index(hvd.rank())
                     # sampler = DistributedSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
-                    sampler = MyElasticSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
-                    sampler.set_epoch(state.epoch, state.processed_num)
+                    sampler = MyElasticSampler(train_dataset)
+                    sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, num_workers=4, sampler=sampler)
                     data_iterator = iter(loader)
                     # ST_fast_forward = time.time()
@@ -158,6 +158,7 @@ def main():
             state.epoch += 1
             state.batch_idx = 0
             state.processed_num = 0
+            sampler.set_epoch(state.epoch, state.processed_num)
 
 def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/custom_hvd/active_workers.txt'):
     # ... (same as before) ...
