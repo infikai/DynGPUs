@@ -112,6 +112,7 @@ def main():
                 new_ranks = read_active_ranks_from_file()
             else:
                 new_ranks = None
+            print(f'updating active rank on {hvd.rank()}')
             new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
 
             if new_ranks != current_active_ranks:
