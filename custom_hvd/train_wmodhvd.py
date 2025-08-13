@@ -137,6 +137,7 @@ def main():
                     # Loop over all model parameters and average their gradients.
                     ST_grad = time.time()
                     print('allreduce:')
+                    print(active_set)
                     allreduce_gradients_manual(model, active_set)
                     # for i, param in enumerate(model.parameters()):
                     #     if param.grad is not None:
