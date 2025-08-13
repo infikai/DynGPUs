@@ -198,7 +198,7 @@ def allreduce_gradients_manual(model, process_set):
         hvd.allreduce_(flat_grads, average=True)
     else: # Subset case
         hvd.allreduce_(flat_grads, average=True, process_set=process_set)
-
+    print('all')
     # 4. Un-flatten the averaged gradients back into the original parameters.
     offset = 0
     for p in params_with_grad:
