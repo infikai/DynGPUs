@@ -101,7 +101,7 @@ def main():
                     local_rank = current_active_ranks.index(hvd.rank())
                     sampler = DistributedSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
                     sampler.set_epoch(state.epoch)
-                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, num_workers=4, sampler=sampler)
+                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, num_workers=4, sampler=sampler)
                     data_iterator = iter(loader)
                     ST_fast_forward = time.time()
                     for _ in range(state.batch_idx):
