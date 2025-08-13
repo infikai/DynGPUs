@@ -104,7 +104,7 @@ class MyElasticSampler(torch.utils.data.Sampler):
             seed = self.seed + self.epoch
             random.Random(seed).shuffle(all_indices)
         self.remaining_indices = all_indices[self.processed_num:]
-        print(f'Processed number: {processed_num}')
+        print(f'Processed number: {self.processed_num}')
         self.num_samples = int(math.ceil(len(self.remaining_indices) * 1.0 / self.num_replicas))
         self.total_size = self.num_samples * self.num_replicas
 
