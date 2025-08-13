@@ -9,6 +9,7 @@ import time
 import os
 from torch.utils.data.distributed import DistributedSampler
 import socket
+import MyElasticSampler
 
 class TrainingState:
     def __init__(self):
@@ -97,7 +98,7 @@ def main():
                     # Data loader setup remains the same
                     local_rank = current_active_ranks.index(hvd.rank())
                     # sampler = DistributedSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
-                    sampler = hvd.ElasticSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
+                    sampler = MyElasticSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
                     sampler.set_epoch(state.epoch, state.processed_num)
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, num_workers=4, sampler=sampler)
                     data_iterator = iter(loader)
