@@ -192,6 +192,7 @@ def allreduce_gradients_manual(model, process_set):
 
     # 2. Flatten all gradients into a single, contiguous tensor.
     flat_grads = torch.cat([p.grad.view(-1) for p in params_with_grad])
+    print('flat')
 
     # 3. Perform a single allreduce on this large tensor.
     if process_set is None: # Full world case
