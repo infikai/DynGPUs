@@ -168,6 +168,7 @@ def main():
                 except StopIteration:
                     break
             else:
+                optimizer.zero_grad()
                 model.cpu()
                 torch.cuda.empty_cache()
                 time.sleep(1)
