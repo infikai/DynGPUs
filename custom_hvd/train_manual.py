@@ -23,7 +23,7 @@ def main():
     print(f'Node: {hostname} binded rank is {hvd.rank()}')
     torch.cuda.set_device(hvd.local_rank())
     model = models.resnet50().cuda()
-    # model = models.vit_l_32(weights=None)
+    # model = models.vit_l_32(weights=None).cuda()
     # Use a standard PyTorch optimizer. We will manage the gradient reduction manually.
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     # criterion = nn.CrossEntropyLoss().cuda()
