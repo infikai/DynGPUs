@@ -23,7 +23,7 @@ class TrainingState:
         self.seed = 0
 
 def main():
-    hvd.init(process_set="dynamic")
+    hvd.init(process_sets="dynamic")
     hostname = socket.gethostname()
     parts = hostname.split('.')
     nodename = parts[0]
