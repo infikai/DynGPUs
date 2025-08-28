@@ -13,7 +13,7 @@ from sampler import MyElasticSampler
 
 # Hyperparameters
 EPOCHS = 100
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 
 class TrainingState:
     def __init__(self):
