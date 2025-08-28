@@ -127,8 +127,9 @@ def main():
                     local_rank = current_active_ranks.index(hvd.rank())
                     ST_sampler = time.time()
                     sampler = MyElasticSampler(train_dataset)
+                    print(f'Sampler1 Cost: {time.time() - ST_sampler}s')
                     sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
-                    print(f'Sampler Cost: {time.time() - ST_sampler}s')
+                    print(f'Sampler2 Cost: {time.time() - ST_sampler}s')
 
                     ST_loader = time.time()
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=4, sampler=sampler)
