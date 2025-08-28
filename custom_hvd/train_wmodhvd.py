@@ -66,7 +66,9 @@ def main():
 
                 if hvd.rank() in current_active_ranks:
                     model.cuda()
+                    ST_opin = time.time()
                     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+                    print(f'opin Cost: {time.time() - ST_opin}s')
                     # State synchronization logic remains the same
                     root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
                     ST_bcast = time.time()
