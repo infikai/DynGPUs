@@ -149,7 +149,7 @@ def main():
 
             if hvd.rank() in current_active_ranks:
                 try:
-                    print('Training:')
+                    # print('Training:')
                     ST_batch = time.time()
 
                     images, target = next(data_iterator)
@@ -161,7 +161,7 @@ def main():
 
                     ST_backward = time.time()
                     loss.backward()
-                    print(f'Backward pass Cost: {time.time() - ST_backward}s')
+                    # print(f'Backward pass Cost: {time.time() - ST_backward}s')
 
                     ST_grad = time.time()
                     for i, param in enumerate(model.parameters()):
@@ -175,7 +175,7 @@ def main():
                     # Step the optimizer with the averaged gradient
                     ST_step = time.time()
                     base_optimizer.step()
-                    print(f'op.step() Cost: {time.time() - ST_step}s')
+                    # print(f'op.step() Cost: {time.time() - ST_step}s')
 
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
                     sampler.record_batch(state.batch_idx, BATCH_SIZE)
