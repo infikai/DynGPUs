@@ -122,7 +122,7 @@ def main():
                         print(f'State Bcast Cost: {time.time() - ST_state}s')
                         
                         print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
-                    print('===')
+                    print('==='*5)
 
                     local_rank = current_active_ranks.index(hvd.rank())
                     ST_sampler = time.time()
@@ -195,7 +195,9 @@ def main():
             state.epoch += 1
             state.batch_idx = 0
             state.processed_num = 0
-            sampler.set_epoch(state.epoch, state.processed_num)
+            local_rank = current_active_ranks.index(hvd.rank())
+            sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
+            # sampler.set_epoch(state.epoch, state.processed_num)
 
 def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/custom_hvd/active_workers.txt'):
     try:
