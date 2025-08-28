@@ -60,7 +60,7 @@ def broadcast_parameters(params, root_rank, process_set=global_process_set):
         synchronize(handle)
 
 
-def broadcast_optimizer_state(optimizer, root_rank, model=None):
+def broadcast_optimizer_state(optimizer, root_rank, process_set=global_process_set, model=None):
     """
     Broadcasts an optimizer state from root rank to all other processes.
 
@@ -191,10 +191,10 @@ def broadcast_optimizer_state(optimizer, root_rank, model=None):
                     callbacks[key] = _create_state_callback(pid, name)
 
     # Synchronized broadcast of all tensor parameters
-    broadcast_parameters(params, root_rank)
+    broadcast_parameters(params, root_rank, process_set)
 
     # Broadcast and cleanup for non-tensor parameters
-    scalars = broadcast_object(scalars, root_rank)
+    scalars = broadcast_object(scalars, root_rank, process_set=process_set)
     for key, p in scalars.items():
         callbacks[key](p)
 
