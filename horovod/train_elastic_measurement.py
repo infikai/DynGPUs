@@ -337,7 +337,7 @@ if __name__ == '__main__':
         batch_size=allreduce_batch_size,
         sampler=train_sampler,
         **kwargs)
-    print(f'Tloader Time: {time.time() - start_Tsampler}s')
+    print(f'Tloader Time: {time.time() - start_Tloader}s')
 
     val_dataset = \
         datasets.ImageFolder(args.val_dir,
