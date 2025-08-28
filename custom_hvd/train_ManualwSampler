@@ -27,7 +27,7 @@ def main():
     hostname = socket.gethostname()
     parts = hostname.split('.')
     nodename = parts[0]
-    print(f'{hostname} binded to horovod rank{hvd.rank()}.')
+    print(f'{nodename} binded to horovod rank{hvd.rank()}.')
 
     torch.cuda.set_device(hvd.local_rank())
 
