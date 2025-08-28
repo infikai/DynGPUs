@@ -81,6 +81,7 @@ def main():
                         print('partial world case')
                         # Case 2: A subset is active. Use the manual object broadcast.
                         hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
+                        ST_op = time.time()
                         if hvd.rank() == root_rank_for_sync:
                             # model_state = model.state_dict()
                             opt_state = base_optimizer.state_dict()
@@ -93,6 +94,7 @@ def main():
                         if hvd.rank() != root_rank_for_sync:
                             # model.load_state_dict(bcast_model_state)
                             base_optimizer.load_state_dict(bcast_opt_state)
+                        print(f'OP Cost: {time.time() - ST_op}s')
 
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
                         print(f'pBCAST cost: {time.time() - ST_bcast}s')
