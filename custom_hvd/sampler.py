@@ -57,7 +57,7 @@ class MyElasticSampler(torch.utils.data.Sampler):
         self.total_size = 0
         self.processed_num = 0
 
-        self.reset()
+        # self.reset()
 
     def set_epoch(self, epoch, processed_num, num_replicas, rank):
         """Sets the epoch for this sampler.
