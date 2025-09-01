@@ -113,16 +113,7 @@ def main():
                         print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
 
                         ST_OP = time.time()
-                        if hvd.rank() == root_rank_for_sync:
-                            # model_state = model.state_dict()
-                            opt_state = base_optimizer.state_dict()
-                        else:
-                            opt_state = None
-                        # bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
-                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
-                        if hvd.rank() != root_rank_for_sync:
-                            # model.load_state_dict(bcast_model_state)
-                            base_optimizer.load_state_dict(bcast_opt_state)
+                        hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
                         print(f'OP Bcast Cost: {time.time() - ST_OP}s')
 
                         ST_state = time.time()
@@ -130,7 +121,7 @@ def main():
                         print(f'State Bcast Cost: {time.time() - ST_state}s')
                         
                         print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
-                    print('===')
+                    print('==='*5)
 
                     local_rank = current_active_ranks.index(hvd.rank())
                     ST_sampler = time.time()
