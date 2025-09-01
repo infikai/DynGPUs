@@ -78,7 +78,7 @@ def train(state):
     print(f'Train() been called in rank {hvd.rank()}')
     start_modeltrain = time.time()
     model.train()
-    print(f'model.train time: {start_batch - start_modeltrain}s')
+    print(f'model.train time: {time.time() - start_modeltrain}s')
     epoch = state.epoch
     train_loss = Metric('train_loss')
     train_accuracy = Metric('train_accuracy')
