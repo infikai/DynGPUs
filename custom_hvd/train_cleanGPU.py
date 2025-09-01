@@ -8,25 +8,35 @@ import torchvision.datasets as datasets
 import horovod.torch as hvd
 import time
 import os
-from torch.utils.data.distributed import DistributedSampler
 import socket
-BATCH_SIZE = 64
+from sampler import MyElasticSampler
+
+# Hyperparameters
+EPOCHS = 100
+BATCH_SIZE = 128
 
 class TrainingState:
     def __init__(self):
         self.epoch = 0
         self.batch_idx = 0
+        self.processed_num = 0
+        self.seed = 0
 
 def main():
     hvd.init(process_sets="dynamic")
     hostname = socket.gethostname()
-    print(f'Node: {hostname} binded rank is {hvd.rank()}')
+    parts = hostname.split('.')
+    nodename = parts[0]
+    print(f'{hostname} binded to horovod rank{hvd.rank()}.')
+
     torch.cuda.set_device(hvd.local_rank())
-    # model = models.resnet50().cuda()
-    model = models.vit_l_32(weights=None).cuda()
-    # Use a standard PyTorch optimizer. We will manage the gradient reduction manually.
+
+    # Two experiment model to test
+    ST_model = time.time()
+    model = models.resnet50().cuda()
+    # model = models.vit_l_32(weights=None).cuda()
+
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    # criterion = nn.CrossEntropyLoss().cuda()
     train_dataset = datasets.ImageFolder(
         os.path.join('/mydata/Data/imagenet', 'train'),
         transform=transforms.Compose([
@@ -35,16 +45,20 @@ def main():
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]))
+
     state = TrainingState()
     current_active_ranks = []
     process_set_cache = {}
 
-    while state.epoch < 100:
+    # Train
+    while state.epoch < EPOCHS:
         config_changed = True
-        
+
         while True:
             if config_changed:
+                # Time how long config took
                 ST_config = time.time()
+
                 # This logic for determining the active set remains the same
                 if hvd.rank() == 0:
                     active_ranks = read_active_ranks_from_file()
@@ -52,9 +66,11 @@ def main():
                     active_ranks = None
                 active_ranks = hvd.broadcast_object(active_ranks, root_rank=0, name="ranks_bcast")
 
+                old_active_ranks = current_active_ranks
                 current_active_ranks = active_ranks
                 is_full_world = (len(current_active_ranks) == hvd.size())
 
+                # Two case to determining
                 if is_full_world:
                     active_set = None
                 else:
@@ -66,48 +82,58 @@ def main():
                     active_set = process_set_cache[ranks_tuple]
 
                 if hvd.rank() in current_active_ranks:
+                    # Move model to GPU
                     model.cuda()
-                    base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-                    # State synchronization logic remains the same
-                    root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
+                    # Assign root rank for sync: partial world assign to smallest old rank number
+                    if not old_active_ranks:
+                        root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
+                    else:
+                        root_rank_for_sync = old_active_ranks[0] if not is_full_world else 0
+                    # Sync Model and Optimizer
                     ST_bcast = time.time()
                     if is_full_world:
-                        print('full world case')
-                        # Case 1: All workers active. Use the efficient built-in functions.
+                        print('=== Full world case ===')
+                        # Case 1: All workers active. Use the built-in functions.
                         hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
+                        print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
+
+                        ST_OP = time.time()
                         hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
+                        print(f'OP Bcast Cost: {time.time() - ST_OP}s')
+
+                        ST_state = time.time()
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
-                        print(f'fBCAST cost: {time.time() - ST_bcast}s')
+                        print(f'State Bcast Cost: {time.time() - ST_state}s')
+
+                        print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     else:
-                        print('partial world case')
+                        print('=== Partial world case ===')
                         # Case 2: A subset is active. Use the manual object broadcast.
                         hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
-                        if hvd.rank() == root_rank_for_sync:
-                            # model_state = model.state_dict()
-                            opt_state = base_optimizer.state_dict()
-                        else:
-                            opt_state = None
+                        print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
 
-                        # bcast_model_state = hvd.broadcast_object(model_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastModel")
-                        bcast_opt_state = hvd.broadcast_object(opt_state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastOpt")
-                        
-                        if hvd.rank() != root_rank_for_sync:
-                            # model.load_state_dict(bcast_model_state)
-                            base_optimizer.load_state_dict(bcast_opt_state)
+                        ST_OP = time.time()
+                        hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
+                        print(f'OP Bcast Cost: {time.time() - ST_OP}s')
 
+                        ST_state = time.time()
                         state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
-                        print(f'pBCAST cost: {time.time() - ST_bcast}s')
+                        print(f'State Bcast Cost: {time.time() - ST_state}s')
+                        
+                        print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
+                    print('==='*5)
 
-                    # Data loader setup remains the same
                     local_rank = current_active_ranks.index(hvd.rank())
-                    sampler = DistributedSampler(train_dataset, num_replicas=len(current_active_ranks), rank=local_rank)
-                    sampler.set_epoch(state.epoch)
+                    ST_sampler = time.time()
+                    sampler = MyElasticSampler(train_dataset)
+                    sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
+                    print(f'Sampler Cost: {time.time() - ST_sampler}s')
+
+                    ST_loader = time.time()
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=4, sampler=sampler)
+                    print(f'Loader Cost: {time.time() - ST_loader}s')
                     data_iterator = iter(loader)
-                    ST_fast_forward = time.time()
-                    for _ in range(state.batch_idx):
-                        next(data_iterator)
-                    print(f'Fast froward cost: {time.time() - ST_fast_forward}s')
+
                 print(f'Config Change Cost: {time.time() - ST_config}s')
                 config_changed = False
 
@@ -116,8 +142,6 @@ def main():
             else:
                 new_ranks = None
             new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
-            print(f'updated active rank on {hvd.rank()}')
-
             if new_ranks != current_active_ranks:
                 config_changed = True
                 break
@@ -126,43 +150,39 @@ def main():
                 try:
                     print('Training:')
                     ST_batch = time.time()
+
                     images, target = next(data_iterator)
                     images, target = images.cuda(), target.cuda()
 
                     base_optimizer.zero_grad()
                     output = model(images)
                     loss = F.cross_entropy(output, target)
-                    ST_back = time.time()
-                    loss.backward()
-                    # --- FIX: Manual Gradient Allreduce ---
-                    # Loop over all model parameters and average their gradients.
-                    ST_grad = time.time()
-                    # print('allreduce:')
-                    # print(active_set)
-                    # if active_set is None:
-                    #     allreduce_name = "grads_full_world"
-                    # else:
-                    #     # Create a name unique to this specific subset of ranks
-                    #     ranks_str = "_".join(map(str, sorted(current_active_ranks)))
-                    #     allreduce_name = f"grads_set_{ranks_str}"
 
-                    # # Pass the unique name to our helper function
-                    # allreduce_gradients_manual(model, active_set, name=allreduce_name)
-                    for i, param in enumerate(model.parameters()):
-                        if param.grad is not None:
-                            if active_set is None:
-                                hvd.allreduce_(param.grad, average=True, name=f"grad_{i}")
-                            else:
-                                hvd.allreduce_(param.grad, average=True, process_set=active_set, name=f"grad_{i}")
-                    print(f'grad allreduce Cost: {time.time() - ST_grad}s')
+                    ST_backward = time.time()
+                    loss.backward()
+                    print(f'Backward pass Cost: {time.time() - ST_backward}s')
+
+                    ST_grad = time.time()
+                    if active_set is None:
+                        allreduce_name = "grads_full_world"
+                    else:
+                        # Create a name unique to this specific subset of ranks
+                        ranks_str = "_".join(map(str, sorted(current_active_ranks)))
+                        allreduce_name = f"grads_set_{ranks_str}"
+
+                    # Pass the unique name to our helper function
+                    allreduce_gradients_manual(model, active_set, name=allreduce_name)
+                    print(f'gradients allreduce Cost: {time.time() - ST_grad}s')
+
                     # Step the optimizer with the averaged gradient
                     ST_step = time.time()
                     base_optimizer.step()
                     print(f'op.step() Cost: {time.time() - ST_step}s')
-                    # --- END FIX ---
+
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
-                    
+                    sampler.record_batch(state.batch_idx, BATCH_SIZE)
                     state.batch_idx += 1
+                    state.processed_num = sampler.get_processed_num()
                     if hvd.rank() == current_active_ranks[0]:
                         print(f"Epoch: {state.epoch} | Batch: {state.batch_idx-1} | Loss: {loss.item():.4f}")
                 except StopIteration:
@@ -173,12 +193,14 @@ def main():
                 torch.cuda.empty_cache()
                 time.sleep(1)
 
+        # epoch end
         if not config_changed:
             state.epoch += 1
             state.batch_idx = 0
+            state.processed_num = 0
+            sampler.set_epoch(state.epoch, state.processed_num)
 
 def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/custom_hvd/active_workers.txt'):
-    # ... (same as before) ...
     try:
         if not os.path.exists(filepath):
             time.sleep(1)
