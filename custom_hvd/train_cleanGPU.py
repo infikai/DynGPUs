@@ -189,6 +189,7 @@ def main():
                     break
             else:
                 base_optimizer.zero_grad()
+                move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
                 torch.cuda.empty_cache()
                 time.sleep(1)
@@ -235,6 +236,13 @@ def allreduce_gradients_manual(model, process_set, name):
         numel = p.grad.numel()
         p.grad.copy_(flat_grads[offset:offset + numel].view_as(p.grad))
         offset += numel
+
+def move_optimizer_state(optimizer, device):
+    """Moves the state of the optimizer to the specified device."""
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if torch.is_tensor(v):
+                state[k] = v.to(device)
 
 if __name__ == "__main__":
     main()
