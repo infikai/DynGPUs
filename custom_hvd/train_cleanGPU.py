@@ -13,7 +13,7 @@ from sampler import MyElasticSampler
 
 # Hyperparameters
 EPOCHS = 100
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 
 class TrainingState:
     def __init__(self):
@@ -33,8 +33,8 @@ def main():
 
     # Two experiment model to test
     ST_model = time.time()
-    model = models.resnet50().cuda()
-    # model = models.vit_l_32(weights=None).cuda()
+    # model = models.resnet50().cuda()
+    model = models.vit_l_32(weights=None).cuda()
 
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     train_dataset = datasets.ImageFolder(
