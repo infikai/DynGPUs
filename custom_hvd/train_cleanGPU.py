@@ -67,8 +67,14 @@ def main():
                 active_ranks = hvd.broadcast_object(active_ranks, root_rank=0, name="ranks_bcast")
 
                 old_active_ranks = current_active_ranks
+                print(f'Old ranks: {old_active_ranks}')
                 current_active_ranks = active_ranks
+                print(f'Old ranks: {current_active_ranks}')
                 is_full_world = (len(current_active_ranks) == hvd.size())
+
+                if hvd.rank() not in old_active_ranks:
+                    print(hvd.rank())
+                    # move_optimizer_state(base_optimizer, 'gpu')
 
                 # Two case to determining
                 if is_full_world:
@@ -108,7 +114,7 @@ def main():
                         print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     else:
                         print('=== Partial world case ===')
-                        # Case 2: A subset is active. Use the manual object broadcast.
+                        # Case 2: A subset is active. Use the altered broadcast function.
                         hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
                         print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
 
