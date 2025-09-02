@@ -201,7 +201,7 @@ def main():
             state.epoch += 1
             state.batch_idx = 0
             state.processed_num = 0
-            sampler.set_epoch(state.epoch, state.processed_num)
+            sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
 
 def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/custom_hvd/active_workers.txt'):
     try:
