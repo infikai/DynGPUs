@@ -90,11 +90,7 @@ def main():
                 if hvd.rank() in current_active_ranks:
                     # Move model to GPU
                     model.cuda()
-                    # Assign root rank for sync: partial world assign to smallest old rank number
-                    if not old_active_ranks:
-                        root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
-                    else:
-                        root_rank_for_sync = old_active_ranks[0] if not is_full_world else 0
+                    root_rank_for_sync = 0
                     # Sync Model and Optimizer
                     ST_bcast = time.time()
                     if is_full_world:
