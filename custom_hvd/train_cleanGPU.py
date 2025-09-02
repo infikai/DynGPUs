@@ -74,7 +74,7 @@ def main():
 
                 if hvd.rank() not in old_active_ranks:
                     print(hvd.rank())
-                    move_optimizer_state(base_optimizer, 'gpu')
+                    move_optimizer_state(base_optimizer, 'cuda')
 
                 # Two case to determining
                 if is_full_world:
