@@ -67,8 +67,14 @@ def main():
                 active_ranks = hvd.broadcast_object(active_ranks, root_rank=0, name="ranks_bcast")
 
                 old_active_ranks = current_active_ranks
+                print(f'Old ranks: {old_active_ranks}')
                 current_active_ranks = active_ranks
+                print(f'Old ranks: {current_active_ranks}')
                 is_full_world = (len(current_active_ranks) == hvd.size())
+
+                if hvd.rank() not in old_active_ranks:
+                    print(hvd.rank())
+                    move_optimizer_state(base_optimizer, 'cuda')
 
                 # Two case to determining
                 if is_full_world:
@@ -84,11 +90,7 @@ def main():
                 if hvd.rank() in current_active_ranks:
                     # Move model to GPU
                     model.cuda()
-                    # Assign root rank for sync: partial world assign to smallest old rank number
-                    if not old_active_ranks:
-                        root_rank_for_sync = current_active_ranks[0] if not is_full_world else 0
-                    else:
-                        root_rank_for_sync = old_active_ranks[0] if not is_full_world else 0
+                    root_rank_for_sync = 0
                     # Sync Model and Optimizer
                     ST_bcast = time.time()
                     if is_full_world:
@@ -188,6 +190,8 @@ def main():
                 except StopIteration:
                     break
             else:
+                base_optimizer.zero_grad()
+                move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
                 torch.cuda.empty_cache()
                 time.sleep(1)
@@ -234,6 +238,13 @@ def allreduce_gradients_manual(model, process_set, name):
         numel = p.grad.numel()
         p.grad.copy_(flat_grads[offset:offset + numel].view_as(p.grad))
         offset += numel
+
+def move_optimizer_state(optimizer, device):
+    """Moves the state of the optimizer to the specified device."""
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if torch.is_tensor(v):
+                state[k] = v.to(device)
 
 if __name__ == "__main__":
     main()
