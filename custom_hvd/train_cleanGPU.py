@@ -185,12 +185,12 @@ def main():
                     sampler.record_batch(state.batch_idx, BATCH_SIZE)
                     state.batch_idx += 1
                     state.processed_num = sampler.get_processed_num()
+                    del images, target, output, loss
                     if hvd.rank() == current_active_ranks[0]:
                         print(f"Epoch: {state.epoch} | Batch: {state.batch_idx-1} | Loss: {loss.item():.4f}")
                 except StopIteration:
                     break
             else:
-                del images, target, output, loss
                 base_optimizer.zero_grad()
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
