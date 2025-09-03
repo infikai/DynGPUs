@@ -190,6 +190,7 @@ def main():
                 except StopIteration:
                     break
             else:
+                del images, target, output, loss
                 base_optimizer.zero_grad()
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
