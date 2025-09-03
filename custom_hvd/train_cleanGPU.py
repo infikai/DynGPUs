@@ -187,7 +187,7 @@ def main():
                     state.processed_num = sampler.get_processed_num()
                     if hvd.rank() == current_active_ranks[0]:
                         print(f"Epoch: {state.epoch} | Batch: {state.batch_idx-1} | Loss: {loss.item():.4f}")
-                    del images, target, output, loss
+                    # del images, target, output, loss nothing different
                 except StopIteration:
                     break
             else:
