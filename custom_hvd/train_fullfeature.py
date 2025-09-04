@@ -10,10 +10,11 @@ import time
 import os
 import socket
 from sampler import MyElasticSampler
+import argparse # MODIFICATION: Import argparse
 
 # Hyperparameters
 EPOCHS = 100
-BATCH_SIZE = 128
+# BATCH_SIZE = 128 # MODIFICATION: Removed hardcoded batch size
 
 class TrainingState:
     def __init__(self):
@@ -23,6 +24,15 @@ class TrainingState:
         self.seed = 0
 
 def main():
+    # MODIFICATION: Add argument parser for model and batch size
+    parser = argparse.ArgumentParser(description='PyTorch ImageNet Training with Dynamic GPUs and CLI args')
+    parser.add_argument('--model', default='resnet50', type=str,
+                        help='model to train (e.g., resnet50, vit_l_32)',
+                        choices=['resnet50', 'vit_l_32'])
+    parser.add_argument('--batch_size', default=128, type=int,
+                        help='input batch size for training')
+    args = parser.parse_args()
+
     hvd.init(process_sets="dynamic")
     hostname = socket.gethostname()
     parts = hostname.split('.')
@@ -31,10 +41,16 @@ def main():
 
     torch.cuda.set_device(hvd.local_rank())
 
-    # Two experiment model to test
+    # MODIFICATION: Select model based on input argument
     ST_model = time.time()
-    model = models.resnet50().cuda()
-    # model = models.vit_l_32(weights=None).cuda()
+    print(f"==> Using model: {args.model} | Batch Size: {args.batch_size}")
+    if args.model == 'resnet50':
+        model = models.resnet50().cuda()
+    elif args.model == 'vit_l_32':
+        model = models.vit_l_32(weights=None).cuda()
+    else:
+        # This case is technically handled by 'choices' in argparse, but it's good practice
+        raise ValueError(f"Unsupported model specified: {args.model}")
 
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     train_dataset = datasets.ImageFolder(
@@ -132,7 +148,8 @@ def main():
                     print(f'Sampler Cost: {time.time() - ST_sampler}s')
 
                     ST_loader = time.time()
-                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=4, sampler=sampler)
+                    # MODIFICATION: Use the batch_size from args
+                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
                     print(f'Loader Cost: {time.time() - ST_loader}s')
                     data_iterator = iter(loader)
 
@@ -182,7 +199,8 @@ def main():
                     print(f'op.step() Cost: {time.time() - ST_step}s')
 
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
-                    sampler.record_batch(state.batch_idx, BATCH_SIZE)
+                    # MODIFICATION: Use the batch_size from args
+                    sampler.record_batch(state.batch_idx, args.batch_size)
                     state.batch_idx += 1
                     state.processed_num = sampler.get_processed_num()
                     if hvd.rank() == current_active_ranks[0]:
