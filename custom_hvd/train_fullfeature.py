@@ -88,11 +88,11 @@ def main():
                 print(f'Old ranks: {current_active_ranks}')
                 is_full_world = (len(current_active_ranks) == hvd.size())
 
-                ST_moveOP = time.time()
                 if hvd.rank() not in old_active_ranks:
+                    ST_moveOP = time.time()
                     print(hvd.rank())
                     move_optimizer_state(base_optimizer, 'cuda')
-                print(f'Move OP to cuda Cost: {time.time() - ST_moveOP}s')
+                    print(f'Move OP to cuda Cost: {time.time() - ST_moveOP}s')
 
                 # Two case to determining
                 if is_full_world:
