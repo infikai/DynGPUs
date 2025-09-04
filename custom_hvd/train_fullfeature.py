@@ -85,10 +85,10 @@ def main():
                 old_active_ranks = current_active_ranks
                 print(f'Old ranks: {old_active_ranks}')
                 current_active_ranks = active_ranks
-                print(f'Old ranks: {current_active_ranks}')
+                print(f'New ranks: {current_active_ranks}')
                 is_full_world = (len(current_active_ranks) == hvd.size())
 
-                if hvd.rank() not in old_active_ranks:
+                if hvd.rank() not in old_active_ranks and hvd.rank() in current_active_ranks:
                     ST_moveOP = time.time()
                     print(hvd.rank())
                     move_optimizer_state(base_optimizer, 'cuda')
