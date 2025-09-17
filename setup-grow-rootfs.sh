@@ -224,3 +224,4 @@ echo "Resized /dev/$ROOT."
 logtend "grow-rootfs"
 
 exit 0
+# Usage: sudo RESIZEROOT=0 sh setup-grow-rootfs.sh
