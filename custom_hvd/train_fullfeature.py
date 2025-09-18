@@ -153,7 +153,9 @@ def main():
                     # MODIFICATION: Use the batch_size from args
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
                     print(f'Loader Cost: {time.time() - ST_loader}s')
+                    ST_iter = time.time()
                     data_iterator = iter(loader)
+                    print(f'Iterator Cost: {time.time() - ST_iter}s')
 
                 print(f'Config Change Cost: {time.time() - ST_config}s')
                 config_changed = False
