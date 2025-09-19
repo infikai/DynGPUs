@@ -70,6 +70,8 @@ def main():
     while state.epoch < EPOCHS:
         config_changed = True
 
+        epoch_finished = 0
+
         while True:
             if config_changed:
                 # Time how long config took
@@ -214,13 +216,17 @@ def main():
                     if hvd.rank() == current_active_ranks[0]:
                         print(f"Epoch: {state.epoch} | Batch: {state.batch_idx-1} | Loss: {loss.item():.4f}")
                 except StopIteration:
-                    break
-            else:
+                    epoch_finished = 1
+            if hvd.rank() not in current_active_ranks:
                 base_optimizer.zero_grad()
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
                 torch.cuda.empty_cache()
                 time.sleep(1)
+            finished_tensor = torch.tensor(epoch_finished)
+            finished_tensor = hvd.broadcast_object(finished_tensor, root_rank=0, name="epoch_end_bcast")
+            if finished_tensor.item() == 1:
+                break
 
         # epoch end
         if not config_changed:
