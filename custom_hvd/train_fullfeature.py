@@ -73,6 +73,7 @@ def main():
         while True:
             if config_changed:
                 # Time how long config took
+                print("Config changing")
                 ST_config = time.time()
 
                 # This logic for determining the active set remains the same
