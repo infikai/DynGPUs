@@ -174,12 +174,16 @@ def main():
                     print('Training:')
                     ST_batch = time.time()
 
+                    ST_data = time.time()
                     images, target = next(data_iterator)
                     images, target = images.cuda(), target.cuda()
+                    print(f'Data Cost: {time.time() - ST_data}s')
 
+                    ST_comp = time.time()
                     base_optimizer.zero_grad()
                     output = model(images)
                     loss = F.cross_entropy(output, target)
+                    print(f'Compute Cost: {time.time() - ST_comp}s')
 
                     loss.backward()
                     print(f'Local Cost: {time.time() - ST_batch}s')
