@@ -181,9 +181,8 @@ def main():
                     output = model(images)
                     loss = F.cross_entropy(output, target)
 
-                    ST_backward = time.time()
                     loss.backward()
-                    print(f'Backward pass Cost: {time.time() - ST_backward}s')
+                    print(f'Local Cost: {time.time() - ST_batch}s')
 
                     ST_grad = time.time()
                     if active_set is None:
@@ -243,23 +242,29 @@ def allreduce_gradients_manual(model, process_set, name):
     Manually performs a single, fused allreduce on all of a model's gradients
     using a provided unique name for the operation.
     """
+    ST_1 = time.time()
     params_with_grad = [p for p in model.parameters() if p.grad is not None]
     if not params_with_grad:
         return
+    print(f'1 Cost: {time.time() - ST_1}s')
 
     flat_grads = torch.cat([p.grad.view(-1) for p in params_with_grad])
 
     # Pass the unique name to the allreduce call
+    ST_2 = time.time()
     if process_set is None:
         hvd.allreduce_(flat_grads, average=True, name=name)
     else:
         hvd.allreduce_(flat_grads, average=True, process_set=process_set, name=name)
+    print(f'2 Cost: {time.time() - ST_2}s')
 
+    ST_3 = time.time()
     offset = 0
     for p in params_with_grad:
         numel = p.grad.numel()
         p.grad.copy_(flat_grads[offset:offset + numel].view_as(p.grad))
         offset += numel
+    print(f'3 Cost: {time.time() - ST_3}s')
 
 def move_optimizer_state(optimizer, device):
     """Moves the state of the optimizer to the specified device."""
