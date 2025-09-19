@@ -151,7 +151,7 @@ def main():
 
                     ST_loader = time.time()
                     # MODIFICATION: Use the batch_size from args
-                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
+                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=8, sampler=sampler)
                     print(f'Loader Cost: {time.time() - ST_loader}s')
                     ST_iter = time.time()
                     data_iterator = iter(loader)
