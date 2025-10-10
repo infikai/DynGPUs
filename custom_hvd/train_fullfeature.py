@@ -77,6 +77,7 @@ def main():
                 # Time how long config took
                 print("Config changing")
                 ST_config = time.time()
+                sync = True
 
                 # This logic for determining the active set remains the same
                 if hvd.rank() == 0:
@@ -90,6 +91,10 @@ def main():
                 current_active_ranks = active_ranks
                 print(f'New ranks: {current_active_ranks}')
                 is_full_world = (len(current_active_ranks) == hvd.size())
+                unique_in_new = list(set(current_active_ranks) - set(old_active_ranks))
+                print(f'Unique in new ranks: {unique_in_new}')
+                if len(unique_in_new) == 0:
+                    sync = False
 
                 if hvd.rank() not in old_active_ranks and hvd.rank() in current_active_ranks:
                     ST_moveOP = time.time()
@@ -113,37 +118,38 @@ def main():
                     model.cuda()
                     root_rank_for_sync = 0
                     # Sync Model and Optimizer
-                    ST_bcast = time.time()
-                    if is_full_world:
-                        print('=== Full world case ===')
-                        # Case 1: All workers active. Use the built-in functions.
-                        hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
-                        print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
+                    if sync:
+                        ST_bcast = time.time()
+                        if is_full_world:
+                            print('=== Full world case ===')
+                            # Case 1: All workers active. Use the built-in functions.
+                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
+                            print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
 
-                        ST_OP = time.time()
-                        hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
-                        print(f'OP Bcast Cost: {time.time() - ST_OP}s')
+                            ST_OP = time.time()
+                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
+                            print(f'OP Bcast Cost: {time.time() - ST_OP}s')
 
-                        ST_state = time.time()
-                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
-                        print(f'State Bcast Cost: {time.time() - ST_state}s')
+                            ST_state = time.time()
+                            state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
+                            print(f'State Bcast Cost: {time.time() - ST_state}s')
 
-                        print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
-                    else:
-                        print('=== Partial world case ===')
-                        # Case 2: A subset is active. Use the manual object broadcast.
-                        hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
-                        print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
+                            print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
+                        else:
+                            print('=== Partial world case ===')
+                            # Case 2: A subset is active. Use the manual object broadcast.
+                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
+                            print(f'Model Bcast Cost: {time.time() - ST_bcast}s')
 
-                        ST_OP = time.time()
-                        hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
-                        print(f'OP Bcast Cost: {time.time() - ST_OP}s')
+                            ST_OP = time.time()
+                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
+                            print(f'OP Bcast Cost: {time.time() - ST_OP}s')
 
-                        ST_state = time.time()
-                        state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
-                        print(f'State Bcast Cost: {time.time() - ST_state}s')
-                        
-                        print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
+                            ST_state = time.time()
+                            state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
+                            print(f'State Bcast Cost: {time.time() - ST_state}s')
+                            
+                            print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
 
                     local_rank = current_active_ranks.index(hvd.rank())
