@@ -11,7 +11,7 @@ import numpy as np
 
 # --- Configuration ---
 # This file is used to communicate with the separate autoscaler script.
-CONCURRENCY_FILE_PATH = "/tmp/vllm_concurrency.txt"
+CONCURRENCY_FILE_PATH = "/mydata/Data/DynGPUs/sys/vllm_concurrency.txt"
 
 
 @dataclass
