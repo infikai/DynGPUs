@@ -9,7 +9,7 @@ from typing import List, Dict
 # --- Configuration ---
 NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template" # We'll use a template
-SERVER_COUNT_LOG_FILE = "/var/log/active_servers.log" # --- NEW: Log file path ---
+SERVER_COUNT_LOG_FILE = "//mydata/Data/DynGPUs/sys/active_servers.log" # --- NEW: Log file path ---
 
 # Adjust these thresholds based on the new metric (running + waiting requests per server)
 SCALE_DOWN_THRESHOLD = 50   # e.g., scale down if avg load per server is below 2
