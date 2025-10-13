@@ -55,8 +55,7 @@ def load_trace_file(filepath: str) -> List[Request]:
 
 async def monitor_concurrency(
     tasks: List[asyncio.Task], 
-    results: List, 
-    # concurrency_list is no longer needed here
+    results: List
 ):
     """A background task to WRITE the number of active requests to a file."""
     while True:
@@ -74,8 +73,7 @@ async def benchmark(
     api_url: str,
     model_name: str,
     requests: List[Request],
-    duration: int,
-    concurrency_list: List[int], # Pass the list to the function
+    duration: int
 ):
     """Main benchmark function to send HTTP requests based on trace file."""
     
@@ -129,7 +127,7 @@ async def benchmark(
 
         # --- START THE MONITORING TASK ---
         monitor_task = asyncio.create_task(
-            monitor_concurrency(tasks, results, concurrency_list)
+            monitor_concurrency(tasks, results)
         )
 
         # Dispatcher loop
@@ -180,7 +178,6 @@ def calculate_metrics(
     requests: List[Request],
     results: List[RequestResult],
     duration: float,
-    concurrency_list: List[int], # Receive the list for reporting
 ):
     """Calculates and prints performance metrics."""
     completed_requests = sum(1 for r in results if r.success)
@@ -193,13 +190,6 @@ def calculate_metrics(
     print(f"Total requests processed: {completed_requests} / {len(results)}")
     print(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
     print(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
-    
-    # --- PRINT CONCURRENCY RESULTS ---
-    if concurrency_list:
-        print(f"Max concurrent requests: {max(concurrency_list)}")
-        print(f"Average concurrent requests: {np.mean(concurrency_list):.2f}")
-    print(f"Real-time concurrency counts: {concurrency_list}")
-    # ---
 
     ttfts, tpots, itls = [], [], []
     for res in results:
@@ -242,10 +232,9 @@ if __name__ == "__main__":
     api_url = f"http://{args.host}:{args.port}{args.endpoint}"
     
     requests = load_trace_file(args.trace_file)
-    concurrency_list = [] # Create the list to store results
     
     start_time = time.perf_counter()
-    results = asyncio.run(benchmark(api_url, args.model_name, requests, args.duration, concurrency_list))
+    results = asyncio.run(benchmark(api_url, args.model_name, requests, args.duration))
     end_time = time.perf_counter()
     
     actual_duration = end_time - start_time
