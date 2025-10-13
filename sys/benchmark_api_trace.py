@@ -57,17 +57,27 @@ def load_trace_file(filepath: str) -> List[Request]:
 
 
 async def monitor_concurrency(tasks: List[asyncio.Task], results: List):
-    """A background task to WRITE the number of active requests to a file every second."""
+    """A background task to monitor and log active requests in real-time."""
     while True:
         try:
             active_tasks = len(tasks) - len(results)
-            # Write the current number to the shared file for the autoscaler to read
+            
+            # --- CHANGE: Add detailed logging to the console ---
+            # This will print a single, updating line of text
+            print(
+                f"\r[{time.strftime('%H:%M:%S')}] "
+                f"Dispatched: {len(tasks)} | "
+                f"Completed: {len(results)} | "
+                f"Active Concurrent: {active_tasks}",
+                end="" # The end="" prevents it from printing new lines
+            )
+
+            # Write the current number to the shared file for the autoscaler
             with open(CONCURRENCY_FILE_PATH, "w") as f:
                 f.write(str(active_tasks))
         except Exception as e:
             print(f"Monitor error: {e}")
             
-        # Update the concurrency value every 1 second
         await asyncio.sleep(1)
 
 
@@ -153,7 +163,12 @@ async def benchmark(
         # an accurate, real-time count of completed tasks.
         for task in asyncio.as_completed(tasks):
             result = await task
+            # Optional: Uncomment the line below for very detailed per-request logs
+            # print(f"\nRequest {result.request_id} finished.")
             results.append(result)
+
+        # Clear the monitoring line at the end
+        print("\r" + " " * 80 + "\r")
 
         # Stop the monitoring task
         monitor_task.cancel()
