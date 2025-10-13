@@ -148,28 +148,35 @@ async def scale_down(count: int) -> bool:
     return False
 
 async def scale_up(count: int) -> bool:
-    """Scales up by adding a specified number of sleeping servers."""
+    """Wakes up servers first, then immediately adds them to Nginx."""
     sleeping_servers = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
     
-    # Clamp the count to the number of available sleeping servers
     actual_count = min(count, len(sleeping_servers))
     if actual_count <= 0:
         print("Scale-up skipped: No sleeping servers available.")
         return False
         
-    # Select servers to wake up
     servers_to_wake = sleeping_servers[:actual_count]
+    
+    # --- Send wake-up command FIRST and wait for it to complete ---
+    print(f"Waking up {len(servers_to_wake)} server(s)...")
+    wake_tasks = [set_server_sleep_state(server, sleep=False) for server in servers_to_wake]
+    await asyncio.gather(*wake_tasks)
+    
+    # --- Immediately update status and Nginx config ---
+    print("Server(s) reported ready. Updating Nginx...")
     for server in servers_to_wake:
         server['status'] = 'active'
     
     new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
-
     if await update_nginx_config(new_active_servers):
         reload_nginx()
-        # Concurrently send wake-up commands
-        wake_tasks = [set_server_sleep_state(server, sleep=False) for server in servers_to_wake]
-        await asyncio.gather(*wake_tasks)
         return True
+    
+    # If the config update failed, revert the status
+    print("ERROR: Nginx update failed. Reverting server status.")
+    for server in servers_to_wake:
+        server['status'] = 'sleeping'
     return False
 
 async def autoscaler_task():
