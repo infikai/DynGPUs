@@ -122,46 +122,59 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
     except httpx.RequestError as e:
         print(f"ERROR: Could not connect to server {server['host']}:{server['port']}: {e}")
 
-async def scale_down():
-    """Scales down by removing one active server."""
+async def scale_down(count: int) -> bool:
+    """Scales down by removing a specified number of active servers."""
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
-    if len(active_servers) <= MIN_ACTIVE_SERVERS:
+    
+    # Clamp the count to what's possible to remove
+    actual_count = min(count, len(active_servers) - MIN_ACTIVE_SERVERS)
+    if actual_count <= 0:
         print("Scale-down skipped: Minimum number of active servers reached.")
-        return
+        return False
 
-    # Select the last active server to put to sleep
-    server_to_sleep = active_servers[-1]
-    server_to_sleep['status'] = 'sleeping'
+    # Select servers to put to sleep
+    servers_to_sleep = active_servers[-actual_count:]
+    for server in servers_to_sleep:
+        server['status'] = 'sleeping'
     
     new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     
     if await update_nginx_config(new_active_servers):
         reload_nginx()
-        await set_server_sleep_state(server_to_sleep, sleep=True)
+        # Concurrently send sleep commands
+        sleep_tasks = [set_server_sleep_state(server, sleep=True) for server in servers_to_sleep]
+        await asyncio.gather(*sleep_tasks)
+        return True
+    return False
 
-async def scale_up():
-    """Scales up by adding one sleeping server."""
+async def scale_up(count: int) -> bool:
+    """Scales up by adding a specified number of sleeping servers."""
     sleeping_servers = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
-    if not sleeping_servers:
+    
+    # Clamp the count to the number of available sleeping servers
+    actual_count = min(count, len(sleeping_servers))
+    if actual_count <= 0:
         print("Scale-up skipped: No sleeping servers available.")
-        return
+        return False
         
-    # Select the first sleeping server to wake up
-    server_to_wake = sleeping_servers[0]
-    server_to_wake['status'] = 'active'
+    # Select servers to wake up
+    servers_to_wake = sleeping_servers[:actual_count]
+    for server in servers_to_wake:
+        server['status'] = 'active'
     
     new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
 
     if await update_nginx_config(new_active_servers):
         reload_nginx()
-        # --- CHANGE: Add the wake-up call after reloading Nginx ---
-        await set_server_sleep_state(server_to_wake, sleep=False)
-        # The server is "woken up" by being added back to the load balancer
-        # You could add a POST request here if your server needs an explicit wake-up call
+        # Concurrently send wake-up commands
+        wake_tasks = [set_server_sleep_state(server, sleep=False) for server in servers_to_wake]
+        await asyncio.gather(*wake_tasks)
+        return True
+    return False
 
 async def autoscaler_task():
-    """The main autoscaler loop that polls server metrics and triggers scaling."""
-    print("🚀 Autoscaler started. Monitoring server metrics...")
+    """The main autoscaler loop that polls server metrics and triggers proportional scaling."""
+    print("🚀 Autoscaler started. Monitoring server metrics for proportional scaling...")
     last_scaling_time = 0
 
     async with httpx.AsyncClient() as client:
@@ -177,35 +190,44 @@ async def autoscaler_task():
             metric_tasks = [get_server_metrics(server, client) for server in active_servers]
             metric_results = await asyncio.gather(*metric_tasks)
 
-            # Calculate total load
             total_running = sum(r['running'] for r in metric_results)
             total_waiting = sum(r['waiting'] for r in metric_results)
             total_cluster_load = total_running + total_waiting
-            
-            # Calculate average load per server
             avg_load_per_server = total_cluster_load / len(active_servers)
 
             print(
                 f"\r[{time.strftime('%H:%M:%S')}] Active Servers: {len(active_servers)} | "
-                f"Total Running: {int(total_running)} | "
-                f"Total Waiting: {int(total_waiting)} | "
                 f"Avg Load/Server: {avg_load_per_server:.2f}", end=""
             )
 
-            # Cooldown logic
             cooldown_over = (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS
             if not cooldown_over:
                 continue
 
-            # Scaling decision logic
+            # --- NEW: Proportional Scaling Logic ---
             if avg_load_per_server < SCALE_DOWN_THRESHOLD:
-                print("\nAverage load per server is low. Triggering scale-down...")
-                await scale_down()
-                last_scaling_time = time.time()
+                # Calculate how many servers to remove
+                # The further below the threshold, the more we scale down
+                load_ratio = avg_load_per_server / SCALE_DOWN_THRESHOLD
+                num_to_remove = int(len(active_servers) * (1 - load_ratio))
+                # Ensure we scale down at least one
+                num_to_remove = max(1, num_to_remove)
+
+                print(f"\nAverage load per server is low. Triggering scale-down of {num_to_remove} server(s)...")
+                if await scale_down(count=num_to_remove):
+                    last_scaling_time = time.time()
+
             elif avg_load_per_server > SCALE_UP_THRESHOLD:
-                print("\nAverage load per server is high. Triggering scale-up...")
-                await scale_up()
-                last_scaling_time = time.time()
+                # Calculate how many servers to add
+                # The further above the threshold, the more we scale up
+                load_ratio = avg_load_per_server / SCALE_UP_THRESHOLD
+                num_to_add = int(len(active_servers) * (load_ratio - 1))
+                # Ensure we scale up at least one
+                num_to_add = max(1, num_to_add)
+
+                print(f"\nAverage load per server is high. Triggering scale-up of {num_to_add} server(s)...")
+                if await scale_up(count=num_to_add):
+                    last_scaling_time = time.time()
 
 if __name__ == "__main__":
     if update_nginx_config(ALL_SERVERS):
