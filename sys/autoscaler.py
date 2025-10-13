@@ -103,7 +103,7 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
     print(f"{action}: {server['host']}:{server['port']}")
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, timeout=10)
+            response = await client.post(url, timeout=20)
             response.raise_for_status()
         print(f"Successfully sent command to {server['host']}:{server['port']}")
     except httpx.RequestError as e:
@@ -111,9 +111,10 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
 
 async def scale_down(count: int) -> bool:
     """
-    Scales down gracefully: removes servers from Nginx, waits for them to be idle,
-    then puts them to sleep.
+    Scales down gracefully and logs the total duration of the process.
     """
+    start_time = time.time() # --- Start timing the full process ---
+    
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     actual_count = min(count, len(active_servers) - MIN_ACTIVE_SERVERS)
     if actual_count <= 0:
@@ -138,35 +139,35 @@ async def scale_down(count: int) -> bool:
         for server in servers_to_scale_down:
             async def wait_and_sleep(s):
                 print(f"\nGracefully shutting down {s['host']}:{s['port']}. Waiting for running requests to finish...")
-                start_time = time.time()
-                waited_time = 0
-                
-                while (time.time() - start_time) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
+                wait_start_time = time.time()
+                while (time.time() - wait_start_time) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
                     metrics = await get_server_metrics(s, client)
                     if metrics.get("running", -1) == 0:
-                        waited_time = time.time() - start_time
-                        print(f"Server {s['host']}:{s['port']} is now idle. Waited {waited_time:.2f} seconds.")
+                        print(f"Server {s['host']}:{s['port']} is now idle.")
                         break
                     await asyncio.sleep(2)
                 else:
-                    waited_time = time.time() - start_time
-                    print(f"\nWARN: Timeout reached waiting for {s['host']}:{s['port']} to become idle after {waited_time:.2f} seconds. Forcing sleep.")
+                    print(f"\nWARN: Timeout reached waiting for {s['host']}:{s['port']} to become idle. Forcing sleep.")
                 
-                # --- NEW: Log the waiting time ---
-                log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Waited {waited_time:.2f}s for {s['host']}:{s['port']} to become idle.\n"
-                with open(SERVER_COUNT_LOG_FILE, "a") as f:
-                    f.write(log_entry)
-
                 await set_server_sleep_state(s, sleep=True)
 
             shutdown_tasks.append(wait_and_sleep(server))
         
         await asyncio.gather(*shutdown_tasks)
 
+    # --- CHANGE: Log the total process duration ---
+    total_duration = time.time() - start_time
+    log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Full scale-down of {actual_count} server(s) took {total_duration:.2f}s.\n"
+    with open(SERVER_COUNT_LOG_FILE, "a") as f:
+        f.write(log_entry)
+
     return True
 
+
 async def scale_up(count: int) -> bool:
-    """Wakes up servers first, then adds them to Nginx, logging the wake-up time."""
+    """Wakes up servers, adds them to Nginx, and logs the total duration of the process."""
+    start_time = time.time() # --- Start timing the full process ---
+
     sleeping_servers = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
     actual_count = min(count, len(sleeping_servers))
     if actual_count <= 0:
@@ -176,17 +177,7 @@ async def scale_up(count: int) -> bool:
     servers_to_wake = sleeping_servers[:actual_count]
     
     print(f"\nWaking up {len(servers_to_wake)} server(s)...")
-    
-    # --- NEW: Log the wake-up time for each server ---
-    async def wake_and_log(server):
-        start_time = time.time()
-        await set_server_sleep_state(server, sleep=False)
-        wake_up_duration = time.time() - start_time
-        log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_UP: Server {server['host']}:{server['port']} wake-up command took {wake_up_duration:.2f}s.\n"
-        with open(SERVER_COUNT_LOG_FILE, "a") as f:
-            f.write(log_entry)
-
-    wake_tasks = [wake_and_log(server) for server in servers_to_wake]
+    wake_tasks = [set_server_sleep_state(server, sleep=False) for server in servers_to_wake]
     await asyncio.gather(*wake_tasks)
     
     print("Server(s) reported ready. Updating Nginx...")
@@ -196,6 +187,13 @@ async def scale_up(count: int) -> bool:
     new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     if await update_nginx_config(new_active_servers):
         reload_nginx()
+        
+        # --- CHANGE: Log the total process duration ---
+        total_duration = time.time() - start_time
+        log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_UP: Full scale-up of {actual_count} server(s) took {total_duration:.2f}s.\n"
+        with open(SERVER_COUNT_LOG_FILE, "a") as f:
+            f.write(log_entry)
+            
         return True
     
     print("ERROR: Nginx update failed. Reverting server status.")
