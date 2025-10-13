@@ -1,8 +1,7 @@
-# benchmark_api_trace.py
-import os
 import argparse
 import asyncio
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import List
@@ -10,7 +9,10 @@ from typing import List
 import aiohttp
 import numpy as np
 
-CONCURRENCY_FILE_PATH = "/mydata/Data/DynGPUs/sys/vllm_concurrency.txt"
+# --- Configuration ---
+# This file is used to communicate with the separate autoscaler script.
+CONCURRENCY_FILE_PATH = "/tmp/vllm_concurrency.txt"
+
 
 @dataclass
 class Request:
@@ -53,32 +55,32 @@ def load_trace_file(filepath: str) -> List[Request]:
     requests.sort(key=lambda r: r.timestamp)
     return requests
 
-async def monitor_concurrency(
-    tasks: List[asyncio.Task], 
-    results: List
-):
-    """A background task to WRITE the number of active requests to a file."""
+
+async def monitor_concurrency(tasks: List[asyncio.Task], results: List):
+    """A background task to WRITE the number of active requests to a file every second."""
     while True:
         try:
             active_tasks = len(tasks) - len(results)
-            # Write the current number to the shared file
+            # Write the current number to the shared file for the autoscaler to read
             with open(CONCURRENCY_FILE_PATH, "w") as f:
                 f.write(str(active_tasks))
         except Exception as e:
             print(f"Monitor error: {e}")
             
-        await asyncio.sleep(3)
+        # Update the concurrency value every 1 second
+        await asyncio.sleep(1)
+
 
 async def benchmark(
     api_url: str,
     model_name: str,
     requests: List[Request],
-    duration: int
+    duration: int,
 ):
     """Main benchmark function to send HTTP requests based on trace file."""
     
     async def process_request(session: aiohttp.ClientSession, request: Request) -> RequestResult:
-        # This function remains the same as before
+        """Coroutine to send one HTTP request and capture detailed timestamps."""
         result = RequestResult(request_id=request.request_id, success=False, output_len=0)
         
         payload = {
@@ -125,53 +127,37 @@ async def benchmark(
         tasks: List[asyncio.Task] = []
         results: List[RequestResult] = []
 
-        # --- START THE MONITORING TASK ---
+        # Start the concurrency monitoring task
         monitor_task = asyncio.create_task(
             monitor_concurrency(tasks, results)
         )
 
-        # Dispatcher loop
-        dispatcher = asyncio.create_task(
-            _dispatch_requests(session, requests, tasks, duration, benchmark_start_time, process_request)
-        )
-        
-        # Gather results as they complete
-        while not dispatcher.done() or len(results) < len(tasks):
-            # Wait for any task to complete
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                results.append(task.result())
-            
-            # If dispatcher is done and all tasks are accounted for, break
-            if dispatcher.done() and len(results) == len(tasks):
+        print("Dispatching requests...")
+        for request in requests:
+            if duration is not None and (time.perf_counter() - benchmark_start_time) >= duration:
+                print(f"\nBenchmark duration of {duration}s reached. No more requests will be sent.")
                 break
 
-        # --- STOP THE MONITORING TASK ---
+            current_time = time.perf_counter() - benchmark_start_time
+            time_to_wait = request.timestamp - current_time
+            if time_to_wait > 0:
+                await asyncio.sleep(time_to_wait)
+                
+            task = asyncio.create_task(process_request(session, request))
+            tasks.append(task)
+        print("All requests have been dispatched. Waiting for completion...")
+
+        # Gather results
+        results = await asyncio.gather(*tasks)
+
+        # Stop the monitoring task
         monitor_task.cancel()
         try:
             await monitor_task
         except asyncio.CancelledError:
-            pass  # Expected cancellation
+            pass # Expected cancellation
 
         return results
-
-
-async def _dispatch_requests(session, requests, tasks, duration, benchmark_start_time, process_request_func):
-    """A separate function to dispatch requests according to the trace."""
-    print("Dispatching requests...")
-    for request in requests:
-        if duration is not None and (time.perf_counter() - benchmark_start_time) >= duration:
-            print(f"\nBenchmark duration of {duration}s reached. No more requests will be sent.")
-            break
-
-        current_time = time.perf_counter() - benchmark_start_time
-        time_to_wait = request.timestamp - current_time
-        if time_to_wait > 0:
-            await asyncio.sleep(time_to_wait)
-            
-        task = asyncio.create_task(process_request_func(session, request))
-        tasks.append(task)
-    print("All requests have been dispatched.")
 
 
 def calculate_metrics(
