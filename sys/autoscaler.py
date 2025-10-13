@@ -11,9 +11,9 @@ NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template" # We'll use a template
 
 # Adjust these thresholds based on the new metric (running + waiting requests per server)
-SCALE_DOWN_THRESHOLD = 2   # e.g., scale down if avg load per server is below 2
-SCALE_UP_THRESHOLD = 10  # e.g., scale up if avg load per server is over 10
-MIN_ACTIVE_SERVERS = 2
+SCALE_DOWN_THRESHOLD = 50   # e.g., scale down if avg load per server is below 2
+SCALE_UP_THRESHOLD = 60  # e.g., scale up if avg load per server is over 10
+MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 30
 MONITOR_INTERVAL_SECONDS = 2 # Check metrics every 10 seconds
 
