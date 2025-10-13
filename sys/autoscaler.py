@@ -13,11 +13,14 @@ NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template" # We'll use a template
 # Define a path for the shared file
 CONCURRENCY_FILE_PATH = "/mydata/Data/DynGPUs/sys/vllm_concurrency.txt"
 
-# Concurrency thresholds for scaling
-SCALE_DOWN_THRESHOLD = 12  # e.g., scale down if avg concurrency is below 10
-SCALE_UP_THRESHOLD = 17    # e.g., scale up if avg concurrency is over 50
-MIN_ACTIVE_SERVERS = 2     # Always keep at least 2 servers active
-AUTOSCALER_INTERVAL_SECONDS = 15 # Check concurrency every 15 seconds
+# Concurrency thresholds for scaling (per-server)
+SCALE_DOWN_THRESHOLD = 2
+SCALE_UP_THRESHOLD = 10
+MIN_ACTIVE_SERVERS = 2
+
+# --- NEW: Cooldown and Monitoring Configuration ---
+MONITOR_INTERVAL_SECONDS = 1  # Check concurrency every second
+SCALING_COOLDOWN_SECONDS = 30 # Wait 3 minutes (180s) between scaling actions
 
 # --- Server State Management ---
 ALL_SERVERS = [
@@ -145,57 +148,61 @@ async def scale_up():
         # You could add a POST request here if your server needs an explicit wake-up call
 
 async def autoscaler_task():
-    """The main autoscaler loop that reads concurrency from a file and triggers scaling."""
+    """The main autoscaler loop that monitors concurrency and triggers scaling with a cooldown."""
     print("🚀 Autoscaler started. Monitoring per-server concurrency...")
-    # This list will store the calculated per-server concurrency readings
     concurrency_readings = []
-    
+    # --- NEW: Track the time of the last scaling action ---
+    last_scaling_time = 0
+
     while True:
-        await asyncio.sleep(AUTOSCALER_INTERVAL_SECONDS)
+        await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
         
         try:
-            # --- CHANGE: Calculate active servers first ---
             active_server_count = sum(1 for s in ALL_SERVERS if s['status'] == 'active')
             if active_server_count == 0:
-                print("No active servers. Waiting...")
                 continue
 
-            # Read the latest TOTAL concurrency value from the shared file
             if not os.path.exists(CONCURRENCY_FILE_PATH):
                 continue
 
             with open(CONCURRENCY_FILE_PATH, "r") as f:
                 total_concurrency = int(f.read().strip())
             
-            # --- CHANGE: Calculate concurrency PER SERVER ---
-            # This is the key change to normalize the metric.
             concurrency_per_server = total_concurrency / active_server_count
-            
             concurrency_readings.append(concurrency_per_server)
             
-            # Use the average of the last 5 readings to smooth out spikes
-            last_n_readings = concurrency_readings[-5:]
+            # Use a rolling average of the last 30 seconds to make decisions
+            last_n_readings = concurrency_readings[-30:]
             avg_concurrency = np.mean(last_n_readings)
             
             print(
-                f"[{time.strftime('%H:%M:%S')}] Active servers: {active_server_count}. "
-                f"Total concurrent reqs: {total_concurrency}. "
-                f"Avg reqs/server: {avg_concurrency:.2f}"
+                f"\r[{time.strftime('%H:%M:%S')}] Active servers: {active_server_count} | "
+                f"Avg reqs/server (last 30s): {avg_concurrency:.2f}", end=""
             )
 
-            # --- CHANGE: Use per-server average for scaling logic ---
+            # --- NEW: Cooldown Logic ---
+            # Check if enough time has passed since the last scaling action.
+            cooldown_over = (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS
+            if not cooldown_over:
+                continue # Skip scaling checks if in cooldown
+
+            # --- Scaling Decision Logic ---
             if avg_concurrency < SCALE_DOWN_THRESHOLD:
-                print("Average load per server is low. Triggering scale-down...")
+                print("\nAverage load per server is low. Triggering scale-down...")
                 await scale_down()
+                last_scaling_time = time.time() # Reset cooldown timer
+                concurrency_readings.clear() # Clear readings after scaling
+            
             elif avg_concurrency > SCALE_UP_THRESHOLD:
-                print("Average load per server is high. Triggering scale-up...")
+                print("\nAverage load per server is high. Triggering scale-up...")
                 await scale_up()
+                last_scaling_time = time.time() # Reset cooldown timer
+                concurrency_readings.clear() # Clear readings after scaling
 
         except (FileNotFoundError, ValueError):
-            print("Waiting for benchmark client to write data...")
             continue
         except Exception as e:
-            print(f"An error occurred in the autoscaler loop: {e}")
+            print(f"\nAn error occurred in the autoscaler loop: {e}")
 
 if __name__ == "__main__":
     if update_nginx_config(ALL_SERVERS):
