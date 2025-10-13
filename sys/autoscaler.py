@@ -10,7 +10,7 @@ NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template" # We'll use a template
 
 # Define a path for the shared file
-CONCURRENCY_FILE_PATH = "/tmp/vllm_concurrency.txt"
+CONCURRENCY_FILE_PATH = "/mydata/Data/DynGPUs/sys/vllm_concurrency.txt"
 
 # Concurrency thresholds for scaling
 SCALE_DOWN_THRESHOLD = 12  # e.g., scale down if avg concurrency is below 10
@@ -24,10 +24,10 @@ ALL_SERVERS = [
     {"host": "10.10.3.1", "port": 8001, "status": "active"},
     {"host": "10.10.3.1", "port": 8002, "status": "active"},
     {"host": "10.10.3.1", "port": 8003, "status": "active"},
-    {"host": "10.10.3.2", "port": 8000, "status": "active"},
-    {"host": "10.10.3.2", "port": 8001, "status": "active"},
-    {"host": "10.10.3.2", "port": 8002, "status": "active"},
-    {"host": "10.10.3.2", "port": 8003, "status": "active"},
+    # {"host": "10.10.3.2", "port": 8000, "status": "active"},
+    # {"host": "10.10.3.2", "port": 8001, "status": "active"},
+    # {"host": "10.10.3.2", "port": 8002, "status": "active"},
+    # {"host": "10.10.3.2", "port": 8003, "status": "active"},
 ]
 
 # This list would be populated by your benchmark client in a real scenario.
