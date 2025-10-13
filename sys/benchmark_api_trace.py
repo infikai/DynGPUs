@@ -2,17 +2,13 @@ import argparse
 import asyncio
 import json
 import os
+import random
 import time
 from dataclasses import dataclass, field
 from typing import List
 
 import aiohttp
 import numpy as np
-
-# --- Configuration ---
-# This file is used to communicate with the separate autoscaler script.
-CONCURRENCY_FILE_PATH = "/mydata/Data/DynGPUs/sys/vllm_concurrency.txt"
-
 
 @dataclass
 class Request:
@@ -52,33 +48,8 @@ def load_trace_file(filepath: str) -> List[Request]:
                 )
             except (json.JSONDecodeError, KeyError) as e:
                 print(f"Warning: Skipping malformed line {i+1} in trace file: {e}")
-    requests.sort(key=lambda r: r.timestamp)
+    # Note: Sorting is now done after the optional downsampling step
     return requests
-
-
-async def monitor_concurrency(tasks: List[asyncio.Task], results: List):
-    """A background task to monitor and log active requests in real-time."""
-    while True:
-        try:
-            active_tasks = len(tasks) - len(results)
-            
-            # --- CHANGE: Add detailed logging to the console ---
-            # This will print a single, updating line of text
-            print(
-                f"\r[{time.strftime('%H:%M:%S')}] "
-                f"Dispatched: {len(tasks)} | "
-                f"Completed: {len(results)} | "
-                f"Active Concurrent: {active_tasks}",
-                end="" # The end="" prevents it from printing new lines
-            )
-
-            # Write the current number to the shared file for the autoscaler
-            with open(CONCURRENCY_FILE_PATH, "w") as f:
-                f.write(str(active_tasks))
-        except Exception as e:
-            print(f"Monitor error: {e}")
-            
-        await asyncio.sleep(1)
 
 
 async def benchmark(
@@ -90,7 +61,7 @@ async def benchmark(
     """Main benchmark function to send HTTP requests based on trace file."""
     
     async def process_request(session: aiohttp.ClientSession, request: Request) -> RequestResult:
-        # This inner function remains the same as before
+        """Coroutine to send one HTTP request and capture detailed timestamps."""
         result = RequestResult(request_id=request.request_id, success=False, output_len=0)
         
         payload = {
@@ -135,12 +106,6 @@ async def benchmark(
     async with aiohttp.ClientSession(connector=conn) as session:
         benchmark_start_time = time.perf_counter()
         tasks: List[asyncio.Task] = []
-        results: List[RequestResult] = []
-
-        # Start the concurrency monitoring task
-        monitor_task = asyncio.create_task(
-            monitor_concurrency(tasks, results)
-        )
 
         print("Dispatching requests...")
         for request in requests:
@@ -157,26 +122,7 @@ async def benchmark(
             tasks.append(task)
         print("All requests have been dispatched. Waiting for completion...")
 
-        # --- CHANGE: Use asyncio.as_completed to get results in real-time ---
-        # This is the key fix. We now loop over tasks as they finish.
-        # The 'results' list will now grow incrementally, giving the monitor
-        # an accurate, real-time count of completed tasks.
-        for task in asyncio.as_completed(tasks):
-            result = await task
-            # Optional: Uncomment the line below for very detailed per-request logs
-            # print(f"\nRequest {result.request_id} finished.")
-            results.append(result)
-
-        # Clear the monitoring line at the end
-        print("\r" + " " * 80 + "\r")
-
-        # Stop the monitoring task
-        monitor_task.cancel()
-        try:
-            await monitor_task
-        except asyncio.CancelledError:
-            pass # Expected cancellation
-
+        results = await asyncio.gather(*tasks)
         return results
 
 
@@ -233,11 +179,34 @@ if __name__ == "__main__":
     parser.add_argument("--model-name", type=str, required=True, help="The name of the model being served.")
     parser.add_argument("--trace-file", type=str, required=True, help="Path to the JSONL trace file.")
     parser.add_argument("--duration", type=int, default=None, help="Benchmark duration in seconds. If set, stops sending new requests after this time.")
+    
+    # --- NEW DOWNSAMPLING ARGUMENT ---
+    parser.add_argument(
+        "--downsample-factor",
+        type=float,
+        default=0.5,
+        help="A factor between 0.0 and 1.0 to randomly sample a fraction of requests from the trace file."
+    )
+    
     args = parser.parse_args()
 
     api_url = f"http://{args.host}:{args.port}{args.endpoint}"
     
     requests = load_trace_file(args.trace_file)
+    
+    # --- NEW DOWNSAMPLING LOGIC ---
+    if args.downsample_factor:
+        if not 0.0 < args.downsample_factor <= 1.0:
+            raise ValueError("Downsample factor must be between 0.0 and 1.0.")
+        
+        original_count = len(requests)
+        num_to_sample = int(original_count * args.downsample_factor)
+        
+        print(f"Downsampling trace from {original_count} to {num_to_sample} requests ({args.downsample_factor:.1%})...")
+        requests = random.sample(requests, num_to_sample)
+
+    # Re-sort requests by timestamp after any potential sampling
+    requests.sort(key=lambda r: r.timestamp)
     
     start_time = time.perf_counter()
     results = asyncio.run(benchmark(api_url, args.model_name, requests, args.duration))
