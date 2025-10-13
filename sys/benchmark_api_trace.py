@@ -234,7 +234,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--endpoint", type=str, default="/v1/completions")
-    parser.add-argument("--model-name", type=str, required=True, help="The name of the model being served.")
+    parser.add_argument("--model-name", type=str, required=True, help="The name of the model being served.")
     parser.add_argument("--trace-file", type=str, required=True, help="Path to the JSONL trace file.")
     parser.add_argument("--duration", type=int, default=None, help="Benchmark duration in seconds. If set, stops sending new requests after this time.")
     args = parser.parse_args()
