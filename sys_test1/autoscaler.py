@@ -25,9 +25,9 @@ GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60 # Timeout for waiting for server to be id
 # --- 🖥️ Server State Management (for 'node1' with 4 GPUs) ---
 ALL_SERVERS = [
     {"host": "node1", "port": 8000, "status": "active", "rank": 0, "shared": True},
-    {"host": "node1", "port": 8001, "status": "active", "rank": 1, "shared": True},
-    {"host": "node1", "port": 8002, "status": "active", "rank": 2, "shared": True},
-    {"host": "node1", "port": 8003, "status": "active", "rank": 3, "shared": True},
+    {"host": "node1", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    {"host": "node1", "port": 8002, "status": "sleeping", "rank": 2, "shared": True},
+    {"host": "node1", "port": 8003, "status": "sleeping", "rank": 3, "shared": True},
 ]
 
 # --- 🟢 ALL FUNCTIONS ARE LIVE 🟢 ---
