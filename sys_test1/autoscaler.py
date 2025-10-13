@@ -13,13 +13,14 @@ ACTIVE_WORKERS_FILE = "/mydata/Data/DynGPUs/custom_hvd/active_workers.txt"
 GPU_MEMORY_FREE_THRESHOLD_MB = 2000
 
 # Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 50
-SCALE_UP_THRESHOLD = 60
+SCALE_DOWN_THRESHOLD = 2.0
+SCALE_UP_THRESHOLD = 10.0
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 2
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60 # Timeout for waiting for server to be idle
 
 # --- 🖥️ Server State Management (for 'node1' with 4 GPUs) ---
 ALL_SERVERS = [
@@ -55,11 +56,9 @@ def write_active_workers(ranks: List[int]):
 async def check_gpu_memory_is_free(server: Dict) -> bool:
     """[LIVE] Connects via SSH to run nvidia-smi and check if GPU memory is below a threshold."""
     if not server.get("shared"): return True
-    
     print(f"\nChecking GPU memory for rank {server['rank']} on {server['host']}...")
     local_gpu_id = server['rank'] % 4
     command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id}"
-    
     try:
         async with asyncssh.connect(server['host']) as conn:
             result = await conn.run(command, check=True)
@@ -91,6 +90,7 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
                   ("Waking up", f"http://{server['host']}:{server['port']}/wake_up")
     print(f"{action}: {server['host']}:{server['port']}")
     try:
+        # Use a new client here as the main one is used in the calling loop
         async with httpx.AsyncClient() as client:
             await client.post(url, timeout=20)
     except httpx.RequestError as e:
@@ -132,29 +132,58 @@ async def log_active_servers():
             print(f"\nERROR: Could not write to log file {SERVER_COUNT_LOG_FILE}: {e}")
         await asyncio.sleep(1)
 
-# --- Scaling Logic & Main Loop ---
-# ... (This section is unchanged) ...
-async def scale_down(count: int) -> bool:
+# --- Scaling Logic ---
+
+async def scale_down(count: int, client: httpx.AsyncClient) -> bool: # MODIFIED: added client
+    """Scales down shared servers using the new graceful shutdown logic."""
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
     actual_count = min(count, len(shared_active_servers), max_possible_to_remove)
     if actual_count <= 0: return False
+    
     servers_to_scale_down = shared_active_servers[:actual_count]
     print(f"\n🔽 Scaling DOWN by {actual_count} server(s).")
-    for server in servers_to_scale_down: server['status'] = 'sleeping'
-    if not await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
-        for server in servers_to_scale_down: server['status'] = 'active'
+    
+    for server in servers_to_scale_down:
+        server['status'] = 'draining' # Use a new status to indicate it's shutting down
+    
+    # 1. Update Nginx to stop sending new requests
+    new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+    if not await update_nginx_config(new_active_servers):
+        for server in servers_to_scale_down: server['status'] = 'active' # Revert
         return False
     reload_nginx()
-    async def coordinate_shutdown(s):
-        await set_server_sleep_state(s, sleep=True)
-        print(f"Adding rank {s['rank']} back to the training job...")
+    
+    # NEW HELPER LOGIC: Wait for server to be idle, then shut down
+    async def coordinate_graceful_shutdown(server: Dict, client: httpx.AsyncClient):
+        shutdown_start_time = time.time()
+        print(f"\nWaiting for server {server['host']}:{server['port']} to finish running requests...")
+        
+        # 2. Wait until the server has no running requests or timeout is reached
+        while (time.time() - shutdown_start_time) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
+            metrics = await get_server_metrics(server, client)
+            if metrics.get('running', 0) == 0:
+                print(f"Server {server['host']}:{server['port']} is now idle.")
+                break
+            await asyncio.sleep(1) # Check every second
+        else: # This 'else' belongs to the 'while' loop, runs if loop finishes without break
+            print(f"WARNING: Timeout reached waiting for {server['host']}:{server['port']} to be idle. Proceeding with shutdown.")
+            
+        # 3. Put the now-idle server to sleep
+        await set_server_sleep_state(server, sleep=True)
+        
+        # 4. Update the active worker file
+        print(f"Adding rank {server['rank']} back to the training job...")
         active_ranks = read_active_workers()
-        if s['rank'] not in active_ranks:
-            active_ranks.append(s['rank'])
+        if server['rank'] not in active_ranks:
+            active_ranks.append(server['rank'])
             write_active_workers(active_ranks)
-    await asyncio.gather(*[coordinate_shutdown(s) for s in servers_to_scale_down])
+        
+        server['status'] = 'sleeping' # Final status change
+    
+    # MODIFIED: Pass client to the shutdown coordinator
+    await asyncio.gather(*[coordinate_graceful_shutdown(s, client) for s in servers_to_scale_down])
     return True
 
 async def scale_up(count: int) -> bool:
@@ -193,22 +222,30 @@ async def autoscaler_task():
     async with httpx.AsyncClient() as client:
         while True:
             await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
+            # MODIFIED: Only consider 'active' servers for metrics, not 'draining' ones
             active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
             if not active_servers: continue
+            
             metric_tasks = [get_server_metrics(server, client) for server in active_servers]
             metric_results = await asyncio.gather(*metric_tasks)
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
             avg_load_per_server = total_load / len(active_servers) if active_servers else 0
+            
             print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers)} | Avg Load/Server: {avg_load_per_server:.2f}", end="")
-            if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
+            
+            if (time.time() - last_scaling_time) < SCALING_COOLDOWN_SECONDS: continue
+            
             if avg_load_per_server < SCALE_DOWN_THRESHOLD and len(active_servers) > MIN_ACTIVE_SERVERS:
                 scale_factor = avg_load_per_server / SCALE_DOWN_THRESHOLD if SCALE_DOWN_THRESHOLD > 0 else 0
                 num_to_scale = max(1, int(len(active_servers) * (1 - scale_factor)))
-                if await scale_down(count=num_to_scale): last_scaling_time = time.time()
+                # MODIFIED: Pass client to scale_down
+                if await scale_down(count=num_to_scale, client=client): 
+                    last_scaling_time = time.time()
             elif avg_load_per_server > SCALE_UP_THRESHOLD:
                 scale_factor = avg_load_per_server / SCALE_UP_THRESHOLD if SCALE_UP_THRESHOLD > 0 else 1
                 num_to_scale = max(1, int(len(active_servers) * (scale_factor - 1)))
-                if await scale_up(count=num_to_scale): last_scaling_time = time.time()
+                if await scale_up(count=num_to_scale): 
+                    last_scaling_time = time.time()
 
 # --- Main Execution ---
 if __name__ == "__main__":
@@ -220,11 +257,14 @@ if __name__ == "__main__":
         else:
             server['status'] = 'sleeping'
     write_active_workers([r for r in [0,1,2,3] if r not in initial_active_ranks])
+    
     print("\n--- Starting Live Autoscaler ---")
     print("WARNING: This script will modify live system files. Run with sudo.")
+    
     loop = asyncio.get_event_loop()
     loop.create_task(log_active_servers())
     loop.create_task(autoscaler_task())
+    
     try:
         loop.run_forever()
     except KeyboardInterrupt:
