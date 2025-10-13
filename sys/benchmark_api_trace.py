@@ -80,7 +80,7 @@ async def benchmark(
     """Main benchmark function to send HTTP requests based on trace file."""
     
     async def process_request(session: aiohttp.ClientSession, request: Request) -> RequestResult:
-        """Coroutine to send one HTTP request and capture detailed timestamps."""
+        # This inner function remains the same as before
         result = RequestResult(request_id=request.request_id, success=False, output_len=0)
         
         payload = {
@@ -147,8 +147,13 @@ async def benchmark(
             tasks.append(task)
         print("All requests have been dispatched. Waiting for completion...")
 
-        # Gather results
-        results = await asyncio.gather(*tasks)
+        # --- CHANGE: Use asyncio.as_completed to get results in real-time ---
+        # This is the key fix. We now loop over tasks as they finish.
+        # The 'results' list will now grow incrementally, giving the monitor
+        # an accurate, real-time count of completed tasks.
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            results.append(result)
 
         # Stop the monitoring task
         monitor_task.cancel()
