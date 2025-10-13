@@ -249,4 +249,4 @@ if __name__ == "__main__":
     end_time = time.perf_counter()
     
     actual_duration = end_time - start_time
-    calculate_metrics(requests, results, actual_duration, concurrency_list)
+    calculate_metrics(requests, results, actual_duration)
