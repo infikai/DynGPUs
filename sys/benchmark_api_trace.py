@@ -184,8 +184,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--downsample-factor",
         type=float,
-        default=0.5,
+        default=None,
         help="A factor between 0.0 and 1.0 to randomly sample a fraction of requests from the trace file."
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42, # A default seed ensures it's reproducible by default
+        help="Random seed for downsampling to ensure reproducibility."
     )
     
     args = parser.parse_args()
@@ -198,6 +204,10 @@ if __name__ == "__main__":
     if args.downsample_factor:
         if not 0.0 < args.downsample_factor <= 1.0:
             raise ValueError("Downsample factor must be between 0.0 and 1.0.")
+        
+        # --- NEW: Set the random seed before sampling ---
+        print(f"Using random seed: {args.seed}")
+        random.seed(args.seed)
         
         original_count = len(requests)
         num_to_sample = int(original_count * args.downsample_factor)
