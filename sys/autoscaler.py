@@ -21,10 +21,10 @@ AUTOSCALER_INTERVAL_SECONDS = 15 # Check concurrency every 15 seconds
 
 # --- Server State Management ---
 ALL_SERVERS = [
-    {"host": "10.10.3.1", "port": 8000, "status": "active"},
-    {"host": "10.10.3.1", "port": 8001, "status": "active"},
-    {"host": "10.10.3.1", "port": 8002, "status": "active"},
-    {"host": "10.10.3.1", "port": 8003, "status": "active"},
+    {"host": "node1", "port": 8000, "status": "active"},
+    {"host": "node1", "port": 8001, "status": "active"},
+    {"host": "node1", "port": 8002, "status": "active"},
+    {"host": "node1", "port": 8003, "status": "active"},
     # {"host": "10.10.3.2", "port": 8000, "status": "active"},
     # {"host": "10.10.3.2", "port": 8001, "status": "active"},
     # {"host": "10.10.3.2", "port": 8002, "status": "active"},
