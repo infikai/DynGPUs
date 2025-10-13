@@ -10,17 +10,13 @@ from typing import List, Dict
 NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template" # We'll use a template
 
-# Define a path for the shared file
-CONCURRENCY_FILE_PATH = "/mydata/Data/DynGPUs/sys/vllm_concurrency.txt"
-
-# Concurrency thresholds for scaling (per-server)
-SCALE_DOWN_THRESHOLD = 2
-SCALE_UP_THRESHOLD = 10
+# Adjust these thresholds based on the new metric (running + waiting requests per server)
+SCALE_DOWN_THRESHOLD = 2   # e.g., scale down if avg load per server is below 2
+SCALE_UP_THRESHOLD = 10  # e.g., scale up if avg load per server is over 10
 MIN_ACTIVE_SERVERS = 2
+SCALING_COOLDOWN_SECONDS = 30
+MONITOR_INTERVAL_SECONDS = 2 # Check metrics every 10 seconds
 
-# --- NEW: Cooldown and Monitoring Configuration ---
-MONITOR_INTERVAL_SECONDS = 1  # Check concurrency every second
-SCALING_COOLDOWN_SECONDS = 30 # Wait 3 minutes (180s) between scaling actions
 
 # --- Server State Management ---
 ALL_SERVERS = [
@@ -34,9 +30,25 @@ ALL_SERVERS = [
     # {"host": "10.10.3.2", "port": 8003, "status": "active"},
 ]
 
-# This list would be populated by your benchmark client in a real scenario.
-# For this standalone script, we will simulate it.
-mock_concurrency_list = []
+# --- NEW FUNCTION: Get metrics from a single server ---
+async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
+    """Fetches and parses metrics from a vLLM server."""
+    url = f"http://{server['host']}:{server['port']}/metrics"
+    running = 0.0
+    waiting = 0.0
+    try:
+        response = await client.get(url, timeout=5)
+        response.raise_for_status()
+        for line in response.text.split('\n'):
+            if line.startswith("vllm:num_requests_running"):
+                running = float(line.rsplit(' ', 1)[1])
+            elif line.startswith("vllm:num_requests_waiting"):
+                waiting = float(line.rsplit(' ', 1)[1])
+    except httpx.RequestError as e:
+        print(f"\nWARN: Could not connect to server {server['host']}:{server['port']} to get metrics: {e}")
+    except Exception as e:
+        print(f"\nERROR: Failed to parse metrics from {server['host']}:{server['port']}: {e}")
+    return {"running": running, "waiting": waiting}
 
 async def update_nginx_config(active_servers: List[Dict]):
     """Generates and writes a new nginx.conf from a template."""
@@ -148,61 +160,52 @@ async def scale_up():
         # You could add a POST request here if your server needs an explicit wake-up call
 
 async def autoscaler_task():
-    """The main autoscaler loop that monitors concurrency and triggers scaling with a cooldown."""
-    print("🚀 Autoscaler started. Monitoring per-server concurrency...")
-    concurrency_readings = []
-    # --- NEW: Track the time of the last scaling action ---
+    """The main autoscaler loop that polls server metrics and triggers scaling."""
+    print("🚀 Autoscaler started. Monitoring server metrics...")
     last_scaling_time = 0
 
-    while True:
-        await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
-        
-        try:
-            active_server_count = sum(1 for s in ALL_SERVERS if s['status'] == 'active')
-            if active_server_count == 0:
+    async with httpx.AsyncClient() as client:
+        while True:
+            await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
+
+            active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+            if not active_servers:
+                print("\nNo active servers. Waiting...")
                 continue
 
-            if not os.path.exists(CONCURRENCY_FILE_PATH):
-                continue
+            # Concurrently fetch metrics from all active servers
+            metric_tasks = [get_server_metrics(server, client) for server in active_servers]
+            metric_results = await asyncio.gather(*metric_tasks)
 
-            with open(CONCURRENCY_FILE_PATH, "r") as f:
-                total_concurrency = int(f.read().strip())
+            # Calculate total load
+            total_running = sum(r['running'] for r in metric_results)
+            total_waiting = sum(r['waiting'] for r in metric_results)
+            total_cluster_load = total_running + total_waiting
             
-            concurrency_per_server = total_concurrency / active_server_count
-            concurrency_readings.append(concurrency_per_server)
-            
-            # Use a rolling average of the last 30 seconds to make decisions
-            last_n_readings = concurrency_readings[-30:]
-            avg_concurrency = np.mean(last_n_readings)
-            
+            # Calculate average load per server
+            avg_load_per_server = total_cluster_load / len(active_servers)
+
             print(
-                f"\r[{time.strftime('%H:%M:%S')}] Active servers: {active_server_count} | "
-                f"Avg reqs/server (last 30s): {avg_concurrency:.2f}", end=""
+                f"\r[{time.strftime('%H:%M:%S')}] Active Servers: {len(active_servers)} | "
+                f"Total Running: {int(total_running)} | "
+                f"Total Waiting: {int(total_waiting)} | "
+                f"Avg Load/Server: {avg_load_per_server:.2f}", end=""
             )
 
-            # --- NEW: Cooldown Logic ---
-            # Check if enough time has passed since the last scaling action.
+            # Cooldown logic
             cooldown_over = (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS
             if not cooldown_over:
-                continue # Skip scaling checks if in cooldown
+                continue
 
-            # --- Scaling Decision Logic ---
-            if avg_concurrency < SCALE_DOWN_THRESHOLD:
+            # Scaling decision logic
+            if avg_load_per_server < SCALE_DOWN_THRESHOLD:
                 print("\nAverage load per server is low. Triggering scale-down...")
                 await scale_down()
-                last_scaling_time = time.time() # Reset cooldown timer
-                concurrency_readings.clear() # Clear readings after scaling
-            
-            elif avg_concurrency > SCALE_UP_THRESHOLD:
+                last_scaling_time = time.time()
+            elif avg_load_per_server > SCALE_UP_THRESHOLD:
                 print("\nAverage load per server is high. Triggering scale-up...")
                 await scale_up()
-                last_scaling_time = time.time() # Reset cooldown timer
-                concurrency_readings.clear() # Clear readings after scaling
-
-        except (FileNotFoundError, ValueError):
-            continue
-        except Exception as e:
-            print(f"\nAn error occurred in the autoscaler loop: {e}")
+                last_scaling_time = time.time()
 
 if __name__ == "__main__":
     if update_nginx_config(ALL_SERVERS):
