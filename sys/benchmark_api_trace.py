@@ -10,7 +10,7 @@ from typing import List
 import aiohttp
 import numpy as np
 
-CONCURRENCY_FILE_PATH = "/tmp/vllm_concurrency.txt"
+CONCURRENCY_FILE_PATH = "/mydata/Data/DynGPUs/sys/vllm_concurrency.txt"
 
 @dataclass
 class Request:
