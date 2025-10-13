@@ -87,6 +87,26 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
     except httpx.RequestError as e:
         print(f"ERROR: Could not connect to server {server['host']}:{server['port']}: {e}")
 
+async def set_server_sleep_state(server: Dict, sleep: bool):
+    """Sends a POST request to put a server to sleep or wake it up."""
+    if sleep:
+        url = f"http://{server['host']}:{server['port']}/sleep?level=1"
+        action = "Putting to sleep"
+    else:
+        # --- CHANGE: This is the new wake-up endpoint ---
+        url = f"http://{server['host']}:{server['port']}/wake_up"
+        action = "Waking up"
+
+    print(f"{action}: {server['host']}:{server['port']}")
+    try:
+        async with httpx.AsyncClient() as client:
+            # Use POST for both actions as requested
+            response = await client.post(url, timeout=5)
+            response.raise_for_status()
+        print(f"Successfully sent command to {server['host']}:{server['port']}")
+    except httpx.RequestError as e:
+        print(f"ERROR: Could not connect to server {server['host']}:{server['port']}: {e}")
+
 async def scale_down():
     """Scales down by removing one active server."""
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
@@ -119,6 +139,8 @@ async def scale_up():
 
     if await update_nginx_config(new_active_servers):
         reload_nginx()
+        # --- CHANGE: Add the wake-up call after reloading Nginx ---
+        await set_server_sleep_state(server_to_wake, sleep=False)
         # The server is "woken up" by being added back to the load balancer
         # You could add a POST request here if your server needs an explicit wake-up call
 
