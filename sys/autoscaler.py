@@ -9,6 +9,7 @@ from typing import List, Dict
 # --- Configuration ---
 NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template" # We'll use a template
+SERVER_COUNT_LOG_FILE = "/var/log/active_servers.log" # --- NEW: Log file path ---
 
 # Adjust these thresholds based on the new metric (running + waiting requests per server)
 SCALE_DOWN_THRESHOLD = 50   # e.g., scale down if avg load per server is below 2
@@ -29,6 +30,22 @@ ALL_SERVERS = [
     # {"host": "10.10.3.2", "port": 8002, "status": "active"},
     # {"host": "10.10.3.2", "port": 8003, "status": "active"},
 ]
+
+async def log_active_servers():
+    """Logs the number of active servers to a file every second."""
+    print(f"📝 Logging active server count to {SERVER_COUNT_LOG_FILE} every second...")
+    while True:
+        try:
+            active_server_count = sum(1 for s in ALL_SERVERS if s['status'] == 'active')
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            log_entry = f"{timestamp}, {active_server_count}\n"
+            
+            with open(SERVER_COUNT_LOG_FILE, "a") as f:
+                f.write(log_entry)
+        except Exception as e:
+            print(f"\nERROR: Could not write to log file: {e}")
+            
+        await asyncio.sleep(1)
 
 # --- Core Functions ---
 
