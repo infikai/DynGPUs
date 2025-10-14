@@ -59,7 +59,6 @@ def read_horovod_hostfile() -> List[int]:
         pass
     return []
 
-# --- MODIFIED FUNCTION ---
 def write_horovod_hostfile(ranks: List[int]):
     """
     Counts active shared ranks and writes the result to the horovod hostfile,
@@ -67,10 +66,8 @@ def write_horovod_hostfile(ranks: List[int]):
     """
     shared_rank_count = len([r for r in ranks if r in ALL_SHARED_RANKS])
     
-    # Always start with the fixed line for node3.
     content_lines = ["node3:4"]
     
-    # Only add the line for node2 if it has active ranks for training.
     if shared_rank_count > 0:
         content_lines.append(f"node2:{shared_rank_count}")
     
@@ -166,20 +163,21 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
 
 async def scale_down(count: int) -> bool:
     """
-    Scales down gracefully, targeting ONLY shared servers. It removes them from Nginx,
-    waits for them to be idle, puts them to sleep, and then returns their GPUs to the
-    training pool in a single batch operation.
+    Scales down gracefully by shutting down the N highest-ranked shared servers.
     """
     start_time = time.time()
     
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
+    # --- CHANGE: Sort servers to always scale down the highest rank first ---
+    shared_active_servers.sort(key=lambda s: s.get('rank', -1), reverse=True)
+    
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
     actual_count = min(count, len(shared_active_servers), max_possible_to_remove)
     
     if actual_count <= 0:
-        print("\nScale-down skipped: No shared servers available to scale down or minimum would be breached.")
+        print("\nScale-down skipped: No shared servers to scale down or minimum would be breached.")
         return False
 
     servers_to_scale_down = shared_active_servers[:actual_count]
@@ -220,23 +218,21 @@ async def scale_down(count: int) -> bool:
     write_horovod_hostfile(active_ranks)
     
     total_duration = time.time() - start_time
-    log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Full scale-down of {actual_count} shared server(s) took {total_duration:.2f}s.\n"
+    log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Took {total_duration:.2f}s for {actual_count} server(s).\n"
     with open(SERVER_COUNT_LOG_FILE, "a") as f:
         f.write(log_entry)
         
     return True
 
+# --- RECONSTRUCTED FUNCTION ---
 async def scale_up(count: int) -> bool:
     """
-    Scales up, prioritizing dedicated servers first. When scaling shared servers,
-    it prioritizes the one with the highest rank number.
+    Scales up by waking servers, using a single batch update for the hostfile.
+    Prioritizes dedicated servers, then shared servers with the highest rank.
     """
-    start_time = time.time()
-    
     all_sleeping = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
     dedicated_sleeping = [s for s in all_sleeping if not s['shared']]
     shared_sleeping = [s for s in all_sleeping if s['shared']]
-
     shared_sleeping.sort(key=lambda s: s['rank'], reverse=True)
     
     servers_to_consider = dedicated_sleeping + shared_sleeping
@@ -248,38 +244,64 @@ async def scale_up(count: int) -> bool:
         
     servers_to_wake = servers_to_consider[:actual_count]
     
+    # --- Step 1: Perform a single batch update to the hostfile ---
+    shared_servers_to_wake = [s for s in servers_to_wake if s['shared']]
+    active_ranks_before = read_horovod_hostfile()
+    
+    if shared_servers_to_wake:
+        ranks_to_remove = [s['rank'] for s in shared_servers_to_wake]
+        print(f"\nAttempting to reclaim ranks {ranks_to_remove} from training job...")
+        
+        new_ranks = [r for r in active_ranks_before if r not in ranks_to_remove]
+        write_horovod_hostfile(new_ranks)
+        await asyncio.sleep(5) # Give Horovod time to release GPUs
+
+    # --- Step 2: Wake up servers and handle GPU memory checks ---
     successfully_woken = []
+    failed_ranks = []
     
     for server in servers_to_wake:
+        wake_server = True
         if server['shared']:
-            active_ranks = read_horovod_hostfile()
-            new_ranks = [r for r in active_ranks if r != server['rank']]
-            write_horovod_hostfile(new_ranks)
-
             if not await check_gpu_memory_is_free(server):
-                print(f"ERROR: GPU memory check failed for rank {server['rank']}. Aborting wake-up for this server.")
-                write_horovod_hostfile(active_ranks)
-                continue
+                print(f"ERROR: GPU for rank {server['rank']} not free. It will not be woken up.")
+                failed_ranks.append(server['rank'])
+                wake_server = False
         
-        await set_server_sleep_state(server, sleep=False)
-        server['status'] = 'active'
-        successfully_woken.append(server)
+        if wake_server:
+            await set_server_sleep_state(server, sleep=False)
+            server['status'] = 'active'
+            successfully_woken.append(server)
+
+    # --- Step 3: Revert any ranks that failed the memory check ---
+    if failed_ranks:
+        print(f"Adding failed ranks {failed_ranks} back to the training job...")
+        current_ranks = read_horovod_hostfile()
+        all_ranks = list(set(current_ranks + failed_ranks))
+        write_horovod_hostfile(all_ranks)
 
     if not successfully_woken:
+        print("No servers were successfully woken up.")
         return False
 
+    # --- Step 4: Update Nginx and handle final revert on failure ---
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
         return True
     
-    print("ERROR: Nginx update failed. Reverting...")
+    # This block runs only if Nginx update fails
+    print("ERROR: Nginx update failed. Reverting all woken servers...")
+    ranks_to_re_add = []
     for server in successfully_woken:
         server['status'] = 'sleeping'
         if server['shared']:
-            ranks = read_horovod_hostfile()
-            if server['rank'] not in ranks:
-                ranks.append(rank)
-                write_horovod_hostfile(ranks)
+            ranks_to_re_add.append(server['rank'])
+
+    if ranks_to_re_add:
+        final_ranks = read_horovod_hostfile()
+        all_ranks = list(set(final_ranks + ranks_to_re_add))
+        write_horovod_hostfile(all_ranks)
+        
     return False
 
 # --- Background Tasks ---
