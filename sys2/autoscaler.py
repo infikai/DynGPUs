@@ -241,29 +241,38 @@ async def scale_up(count: int) -> bool:
     
     successfully_woken = []
     
-    # This loop now iterates through the prioritized list
-    for server in servers_to_wake:
-        if server['shared']:
-            # Coordinated wake-up for shared servers (logic remains the same)
-            active_ranks = read_active_workers()
-            new_ranks = [r for r in active_ranks if r != server['rank']]
-            write_active_workers(new_ranks)
-
-            if not await check_gpu_memory_is_free(server):
-                print(f"ERROR: GPU memory check failed for rank {server['rank']}. Aborting wake-up for this server.")
-                write_active_workers(active_ranks) # Revert
-                continue
+    shared_servers_to_wake = [s for s in servers_to_wake if s['shared']]
+    if shared_servers_to_wake:
+        original_active_ranks = read_active_workers()
+        ranks_to_remove = [s['rank'] for s in shared_servers_to_wake]
+        print(f"\nRequesting to remove ranks {ranks_to_remove} from the training job...")
         
+        new_active_ranks = [r for r in original_active_ranks if r not in ranks_to_remove]
+        write_active_workers(new_active_ranks)
+        
+        # Pre-check memory for all shared servers before proceeding
+        memory_checks = await asyncio.gather(*[check_gpu_memory_is_free(s) for s in shared_servers_to_wake])
+        if not all(memory_checks):
+            print("ERROR: GPU memory check failed for one or more servers. Aborting scale-up and reverting training file.")
+            write_active_workers(original_active_ranks) # Revert
+            return False
+
+    # --- Step 3: Proceed to wake up all selected servers individually ---
+    for server in servers_to_wake:
         await set_server_sleep_state(server, sleep=False)
         server['status'] = 'active'
         successfully_woken.append(server)
 
     if not successfully_woken:
+        # If we failed to wake any servers but modified the training file, revert it
+        if shared_servers_to_wake:
+             write_active_workers(original_active_ranks)
         return False
 
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
-        # ... (logging logic remains the same)
+        log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_UP: Full scale-up of {len(successfully_woken)} server(s) took {time.time() - start_time:.2f}s.\n"
+        with open(SERVER_COUNT_LOG_FILE, "a") as f: f.write(log_entry)
         return True
     
     # Revert logic if Nginx fails
