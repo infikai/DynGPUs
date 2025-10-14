@@ -23,6 +23,9 @@ SCALING_COOLDOWN_SECONDS = 20
 MONITOR_INTERVAL_SECONDS = 2
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 2000
+GPU_FREE_TIMEOUT_SECONDS = 10  # --- NEW: Max time to wait for GPU memory to become free ---
+GPU_FREE_POLL_INTERVAL_SECONDS = 1 # --- NEW: How often to check the GPU memory ---
+
 
 # --- 🖥️ Server State Management ---
 # `rank` only exists for shared servers that are part of the training job.
@@ -60,22 +63,42 @@ def write_active_workers(ranks: List[int]):
     print(f"\nUpdated active_workers.txt with ranks: {content}")
 
 async def check_gpu_memory_is_free(server: Dict) -> bool:
-    """Connects via SSH to run nvidia-smi and check if GPU memory is below a threshold."""
-    if not server.get("shared"): return True # Not a shared server, so no need to check
-    
-    print(f"\nChecking GPU memory for rank {server['rank']} on {server['host']}...")
+    """
+    Connects to a server via SSH and polls nvidia-smi until the GPU's memory
+    is below a threshold or a timeout is reached.
+    """
+    if not server.get("shared"):
+        return True
+
+    print(f"\nWaiting for GPU memory to be freed for rank {server['rank']} on {server['host']}...")
     local_gpu_id = server['rank'] % 4
     command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id}"
     
-    try:
-        async with asyncssh.connect(server['host']) as conn:
-            result = await conn.run(command, check=True)
-            memory_used_mb = int(result.stdout.strip())
-            print(f"Rank {server['rank']} is using {memory_used_mb} MiB of memory.")
-            return memory_used_mb < GPU_MEMORY_FREE_THRESHOLD_MB
-    except (asyncssh.Error, OSError, ValueError) as e:
-        print(f"\nERROR: Failed to check GPU memory for rank {server['rank']}: {e}")
-        return False
+    start_time = time.time()
+    # --- NEW: Polling loop with a timeout ---
+    while (time.time() - start_time) < GPU_FREE_TIMEOUT_SECONDS:
+        try:
+            async with asyncssh.connect(server['host']) as conn:
+                result = await conn.run(command, check=True)
+                memory_used_mb = int(result.stdout.strip())
+                
+                print(f"\rRank {server['rank']} on {server['host']} is using {memory_used_mb} MiB of memory...", end="")
+                
+                # If memory is below the threshold, the GPU is free.
+                if memory_used_mb < GPU_MEMORY_FREE_THRESHOLD_MB:
+                    print(f"\nGPU for rank {server['rank']} is now free.")
+                    return True
+            
+            # If not free, wait for the poll interval before checking again.
+            await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
+            
+        except (asyncssh.Error, OSError, ValueError) as e:
+            print(f"\nERROR: Failed to check GPU memory for rank {server['rank']}: {e}. Retrying...")
+            await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
+
+    # --- NEW: This code runs if the while loop finishes (timeout) ---
+    print(f"\nERROR: Timeout reached. GPU memory for rank {server['rank']} on {server['host']} was not freed in time.")
+    return False
 
 async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
     """Fetches and parses metrics from a vLLM server's /metrics endpoint."""
