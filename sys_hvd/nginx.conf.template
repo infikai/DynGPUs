@@ -15,7 +15,7 @@ http {
     }
 
     server {
-        listen 8000;
+        listen 8888;
 
         location / {
             proxy_pass http://inference_servers;
