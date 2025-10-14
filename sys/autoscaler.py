@@ -14,8 +14,8 @@ SERVER_COUNT_LOG_FILE = "/var/log/active_servers.log"
 ACTIVE_WORKERS_FILE = "/mydata/Data/DynGPUs/custom_hvd/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 2
-SCALE_UP_THRESHOLD = 10
+SCALE_DOWN_THRESHOLD = 45
+SCALE_UP_THRESHOLD = 60
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 4
@@ -33,10 +33,10 @@ ALL_SERVERS = [
     {"host": "10.10.3.1", "port": 8002, "status": "active", "shared": False},
     {"host": "10.10.3.1", "port": 8003, "status": "active", "shared": False},
     # Shared servers that have a corresponding training rank
-    {"host": "10.10.3.2", "port": 8000, "status": "active", "rank": 4, "shared": True},
-    {"host": "10.10.3.2", "port": 8001, "status": "active", "rank": 5, "shared": True},
-    {"host": "10.10.3.2", "port": 8002, "status": "active", "rank": 6, "shared": True},
-    {"host": "10.10.3.2", "port": 8003, "status": "active", "rank": 7, "shared": True},
+    {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
+    {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
+    {"host": "10.10.3.2", "port": 8002, "status": "sleeping", "rank": 6, "shared": True},
+    {"host": "10.10.3.2", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
 ]
 
 
