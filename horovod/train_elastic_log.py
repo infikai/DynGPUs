@@ -287,7 +287,7 @@ class Metric(object):
 def full_train(state):
     while state.epoch < args.epochs:
         train(state)
-        validate(state.epoch)
+        # validate(state.epoch)
         # save_checkpoint(state.epoch)
         end_epoch(state)
 
