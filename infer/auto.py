@@ -8,7 +8,7 @@ from typing import List, Dict
 # File Paths
 NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template"
-AUTOSCALER_LOG_FILE = "/var/log/inference_autoscaler.log"
+AUTOSCALER_LOG_FILE = "./inference_autoscaler.log"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
 SCALE_DOWN_THRESHOLD = 45
