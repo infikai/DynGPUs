@@ -223,14 +223,14 @@ async def scale_down(count: int) -> bool:
 async def scale_up(count: int) -> bool:
     """
     Scales up by waking servers, prioritizing dedicated servers, then shared
-    servers with the LOWEST rank.
+    servers with the HIGHEST rank.
     """
     all_sleeping = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
     dedicated_sleeping = [s for s in all_sleeping if not s['shared']]
     shared_sleeping = [s for s in all_sleeping if s['shared']]
     
-    # --- POLICY CHANGE: Sort servers to always scale up the LOWEST rank first ---
-    shared_sleeping.sort(key=lambda s: s['rank']) # Removed reverse=True
+    # --- POLICY CHANGE: Sort servers to always scale up the HIGHEST rank first ---
+    shared_sleeping.sort(key=lambda s: s['rank'], reverse=True)
     
     servers_to_consider = dedicated_sleeping + shared_sleeping
     
