@@ -5,7 +5,6 @@ import time
 import numpy as np
 import asyncssh
 from typing import List, Dict
-from collections import Counter
 
 # --- ⚙️ Configuration ---
 # File Paths
@@ -14,68 +13,73 @@ NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
 HOROVOD_HOSTFILE_PATH = "/mydata/Data/DynGPUs/horovod/hostfile.txt"
 
-# Node Mapping & GPU Info
-NODE_IP_MAPPING = {"node1": "10.10.3.1", "node2": "10.10.3.2"}
-GPUS_PER_NODE = 4
-
 # Scaling Thresholds (based on average (running + waiting) requests per server)
 SCALE_DOWN_THRESHOLD = 45
 SCALE_UP_THRESHOLD = 60
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 4
-SCALING_COOLDOWN_SECONDS = 40
+SCALING_COOLDOWN_SECONDS = 20
 MONITOR_INTERVAL_SECONDS = 2
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 3500
-GPU_FREE_TIMEOUT_SECONDS = 10  # --- NEW: Max time to wait for GPU memory to become free ---
-GPU_FREE_POLL_INTERVAL_SECONDS = 1 # --- NEW: How often to check the GPU memory ---
+GPU_FREE_TIMEOUT_SECONDS = 10
+GPU_FREE_POLL_INTERVAL_SECONDS = 1
+
 
 # --- 🖥️ Server State Management ---
-# `rank` is used again to map a server to a specific GPU slot.
 ALL_SERVERS = [
-    # Dedicated inference-only servers (on node1)
+    # Dedicated inference-only servers (no rank)
     {"host": "10.10.3.1", "port": 8000, "status": "active", "shared": False},
     {"host": "10.10.3.1", "port": 8001, "status": "active", "shared": False},
     {"host": "10.10.3.1", "port": 8002, "status": "active", "shared": False},
     {"host": "10.10.3.1", "port": 8003, "status": "active", "shared": False},
-    # Shared servers that can be used for training (on node2)
+    # Shared servers that have a corresponding training rank
     {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
     {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
     {"host": "10.10.3.2", "port": 8002, "status": "sleeping", "rank": 6, "shared": True},
     {"host": "10.10.3.2", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
 ]
+ALL_SHARED_RANKS = [4, 5, 6, 7]
 
 
 # --- Helper Functions ---
 
-def read_active_hosts() -> Dict[str, int]:
-    """Reads the horovod hostfile and returns a dict of {ip: gpu_slot_count}."""
-    active_hosts = {}
+def read_horovod_hostfile() -> List[int]:
+    """Reads the horovod hostfile, parses the count for node2, and returns the corresponding ranks."""
     try:
         with open(HOROVOD_HOSTFILE_PATH, "r") as f:
             for line in f:
-                if not line.strip(): continue
-                name, count = line.strip().split(':')
-                ip = NODE_IP_MAPPING.get(name)
-                if ip:
-                    active_hosts[ip] = int(count)
-    except FileNotFoundError:
+                line = line.strip()
+                if line.startswith("node2:"):
+                    count = int(line.split(':')[1])
+                    active_ranks = sorted(ALL_SHARED_RANKS)[-count:] if count > 0 else []
+                    return active_ranks
+    except (FileNotFoundError, IndexError, ValueError):
         pass
-    return active_hosts
+    return []
 
-def write_active_hosts(hosts: Dict[str, int]):
-    """Writes the dict of {ip: gpu_slot_count} to the horovod hostfile."""
-    ip_to_node_mapping = {v: k for k, v in NODE_IP_MAPPING.items()}
-    lines = []
-    for ip, count in sorted(hosts.items()):
-        node_name = ip_to_node_mapping.get(ip)
-        if node_name and count > 0: # Only write hosts with slots > 0
-            lines.append(f"{node_name}:{count}")
-
-    content = "\n".join(lines)
+# --- MODIFIED FUNCTION ---
+def write_horovod_hostfile(ranks: List[int]):
+    """
+    Counts active shared ranks and writes the result to the horovod hostfile,
+    ensuring node3:4 is always the first line.
+    """
+    shared_rank_count = len([r for r in ranks if r in ALL_SHARED_RANKS])
+    
+    # Always start with the fixed line for node3.
+    content_lines = ["node3:4"]
+    
+    # Only add the line for node2 if it has active ranks for training.
+    if shared_rank_count > 0:
+        content_lines.append(f"node2:{shared_rank_count}")
+    
+    content = "\n".join(content_lines)
+    
     with open(HOROVOD_HOSTFILE_PATH, "w") as f:
         f.write(content)
     print(f"\nUpdated {HOROVOD_HOSTFILE_PATH} with content:\n---\n{content}\n---")
+
 
 async def check_gpu_memory_is_free(server: Dict) -> bool:
     """
@@ -90,7 +94,6 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
     command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id}"
     
     start_time = time.time()
-    # --- NEW: Polling loop with a timeout ---
     while (time.time() - start_time) < GPU_FREE_TIMEOUT_SECONDS:
         try:
             async with asyncssh.connect(server['host']) as conn:
@@ -99,35 +102,36 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
                 
                 print(f"\rRank {server['rank']} on {server['host']} is using {memory_used_mb} MiB of memory...", end="")
                 
-                # If memory is below the threshold, the GPU is free.
                 if memory_used_mb < GPU_MEMORY_FREE_THRESHOLD_MB:
                     print(f"\nGPU for rank {server['rank']} is now free.")
                     return True
             
-            # If not free, wait for the poll interval before checking again.
             await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
             
         except (asyncssh.Error, OSError, ValueError) as e:
             print(f"\nERROR: Failed to check GPU memory for rank {server['rank']}: {e}. Retrying...")
             await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
 
-    # --- NEW: This code runs if the while loop finishes (timeout) ---
     print(f"\nERROR: Timeout reached. GPU memory for rank {server['rank']} on {server['host']} was not freed in time.")
     return False
 
 async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
+    """Fetches and parses metrics from a vLLM server's /metrics endpoint."""
     url = f"http://{server['host']}:{server['port']}/metrics"
     running, waiting = 0.0, 0.0
     try:
         response = await client.get(url, timeout=5)
         response.raise_for_status()
         for line in response.text.split('\n'):
-            if line.startswith("vllm:num_requests_running"): running = float(line.rsplit(' ', 1)[1])
-            elif line.startswith("vllm:num_requests_waiting"): waiting = float(line.rsplit(' ', 1)[1])
+            if line.startswith("vllm:num_requests_running"):
+                running = float(line.rsplit(' ', 1)[1])
+            elif line.startswith("vllm:num_requests_waiting"):
+                waiting = float(line.rsplit(' ', 1)[1])
     except httpx.RequestError: pass
     return {"running": running, "waiting": waiting}
 
 async def update_nginx_config(active_servers: List[Dict]) -> bool:
+    """Generates and writes a new nginx.conf from a template."""
     print("\nUpdating Nginx configuration...")
     upstream_servers = "".join([f"        server {s['host']}:{s['port']};\n" for s in active_servers])
     try:
@@ -139,6 +143,7 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
         print(f"\nERROR: Failed to write Nginx config: {e}"); return False
 
 def reload_nginx():
+    """Executes the command to reload Nginx gracefully."""
     print("Reloading Nginx...")
     try:
         subprocess.run(["sudo", "nginx", "-s", "reload"], check=True)
@@ -147,6 +152,7 @@ def reload_nginx():
         print(f"\nERROR: Failed to reload Nginx: {e}")
 
 async def set_server_sleep_state(server: Dict, sleep: bool):
+    """Sends a POST request to put a server to sleep or wake it up."""
     action, url = ("Putting to sleep", f"http://{server['host']}:{server['port']}/sleep?level=1") if sleep else \
                   ("Waking up", f"http://{server['host']}:{server['port']}/wake_up")
     print(f"{action}: {server['host']}:{server['port']}")
@@ -159,7 +165,13 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
 # --- Scaling Logic ---
 
 async def scale_down(count: int) -> bool:
-    """Scales down by shutting down `count` shared servers and adding their slots to Horovod."""
+    """
+    Scales down gracefully, targeting ONLY shared servers. It removes them from Nginx,
+    waits for them to be idle, puts them to sleep, and then returns their GPUs to the
+    training pool in a single batch operation.
+    """
+    start_time = time.time()
+    
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
@@ -167,24 +179,23 @@ async def scale_down(count: int) -> bool:
     actual_count = min(count, len(shared_active_servers), max_possible_to_remove)
     
     if actual_count <= 0:
-        print("\nScale-down skipped: No shared servers available or minimum would be breached.")
+        print("\nScale-down skipped: No shared servers available to scale down or minimum would be breached.")
         return False
 
     servers_to_scale_down = shared_active_servers[:actual_count]
-    print(f"\nScaling down by {len(servers_to_scale_down)} servers...")
     
     for server in servers_to_scale_down:
         server['status'] = 'sleeping'
     
-    if not await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
-        for server in servers_to_scale_down: server['status'] = 'active' # Revert
+    new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+    if not await update_nginx_config(new_active_servers):
+        for server in servers_to_scale_down:
+            server['status'] = 'active'
         return False
     reload_nginx()
     
-    # Gracefully shut down servers, then update hostfile once.
     async with httpx.AsyncClient() as client:
         async def wait_and_sleep(s):
-            """Helper to handle graceful shutdown for one server."""
             print(f"\nGracefully shutting down shared server {s['host']}:{s['port']}...")
             wait_start_time = time.time()
             while (time.time() - wait_start_time) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
@@ -199,14 +210,20 @@ async def scale_down(count: int) -> bool:
             await set_server_sleep_state(s, sleep=True)
 
         await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
+
+    ranks_to_add = [s['rank'] for s in servers_to_scale_down]
+    print(f"\nAdding ranks {ranks_to_add} back to the training job...")
+    active_ranks = read_horovod_hostfile()
+    for rank in ranks_to_add:
+        if rank not in active_ranks:
+            active_ranks.append(rank)
+    write_horovod_hostfile(active_ranks)
     
-    hosts_to_update = Counter(s['host'] for s in servers_to_scale_down)
-    active_hosts = read_active_hosts()
-    for host, num_slots in hosts_to_update.items():
-        print(f"Adding {num_slots} slots to host {host} for training.")
-        active_hosts[host] = active_hosts.get(host, 0) + num_slots
-    write_active_hosts(active_hosts)
-    
+    total_duration = time.time() - start_time
+    log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Full scale-down of {actual_count} shared server(s) took {total_duration:.2f}s.\n"
+    with open(SERVER_COUNT_LOG_FILE, "a") as f:
+        f.write(log_entry)
+        
     return True
 
 async def scale_up(count: int) -> bool:
@@ -220,10 +237,8 @@ async def scale_up(count: int) -> bool:
     dedicated_sleeping = [s for s in all_sleeping if not s['shared']]
     shared_sleeping = [s for s in all_sleeping if s['shared']]
 
-    # --- NEW: Sort shared servers to prioritize the highest rank first ---
     shared_sleeping.sort(key=lambda s: s['rank'], reverse=True)
     
-    # The final priority list: dedicated servers, then shared servers by highest rank
     servers_to_consider = dedicated_sleeping + shared_sleeping
     
     actual_count = min(count, len(servers_to_consider))
@@ -235,17 +250,15 @@ async def scale_up(count: int) -> bool:
     
     successfully_woken = []
     
-    # This loop now iterates through the prioritized list
     for server in servers_to_wake:
         if server['shared']:
-            # Coordinated wake-up for shared servers (logic remains the same)
-            active_ranks = read_active_workers()
+            active_ranks = read_horovod_hostfile()
             new_ranks = [r for r in active_ranks if r != server['rank']]
-            write_active_workers(new_ranks)
+            write_horovod_hostfile(new_ranks)
 
             if not await check_gpu_memory_is_free(server):
                 print(f"ERROR: GPU memory check failed for rank {server['rank']}. Aborting wake-up for this server.")
-                write_active_workers(active_ranks) # Revert
+                write_horovod_hostfile(active_ranks)
                 continue
         
         await set_server_sleep_state(server, sleep=False)
@@ -257,23 +270,22 @@ async def scale_up(count: int) -> bool:
 
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
-        # ... (logging logic remains the same)
         return True
     
-    # Revert logic if Nginx fails
     print("ERROR: Nginx update failed. Reverting...")
     for server in successfully_woken:
         server['status'] = 'sleeping'
         if server['shared']:
-            ranks = read_active_workers()
+            ranks = read_horovod_hostfile()
             if server['rank'] not in ranks:
-                ranks.append(server['rank'])
-                write_active_workers(ranks)
+                ranks.append(rank)
+                write_horovod_hostfile(ranks)
     return False
 
 # --- Background Tasks ---
 
 async def log_active_servers():
+    """Logs the number of active servers to a file every second."""
     print(f"📝 Logging active server count to {SERVER_COUNT_LOG_FILE}...")
     while True:
         try:
@@ -303,7 +315,6 @@ async def autoscaler_task():
 
             if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
 
-            # Proportional scaling logic
             if avg_load_per_server < SCALE_DOWN_THRESHOLD:
                 scale_factor = avg_load_per_server / SCALE_DOWN_THRESHOLD if SCALE_DOWN_THRESHOLD > 0 else 0
                 num_to_scale = max(1, int(len(active_servers) * (1 - scale_factor)))
@@ -316,7 +327,7 @@ async def autoscaler_task():
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    if update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
+    if update_nginx_config(ALL_SERVERS):
         reload_nginx()
 
     loop = asyncio.get_event_loop()
