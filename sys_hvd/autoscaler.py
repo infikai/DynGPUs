@@ -210,56 +210,65 @@ async def scale_down(count: int) -> bool:
     return True
 
 async def scale_up(count: int) -> bool:
-    """Scales up by reclaiming `count` slots from Horovod and waking up their servers."""
-    sleeping_shared_servers = [s for s in ALL_SERVERS if s['status'] == 'sleeping' and s['shared']]
-    actual_count = min(count, len(sleeping_shared_servers))
+    """
+    Scales up, prioritizing dedicated servers first. When scaling shared servers,
+    it prioritizes the one with the highest rank number.
+    """
+    start_time = time.time()
     
+    all_sleeping = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
+    dedicated_sleeping = [s for s in all_sleeping if not s['shared']]
+    shared_sleeping = [s for s in all_sleeping if s['shared']]
+
+    # --- NEW: Sort shared servers to prioritize the highest rank first ---
+    shared_sleeping.sort(key=lambda s: s['rank'], reverse=True)
+    
+    # The final priority list: dedicated servers, then shared servers by highest rank
+    servers_to_consider = dedicated_sleeping + shared_sleeping
+    
+    actual_count = min(count, len(servers_to_consider))
     if actual_count <= 0:
-        print("\nScale-up skipped: No sleeping shared servers available.")
+        print("\nScale-up skipped: No available servers to wake up.")
         return False
         
-    servers_to_wake = sleeping_shared_servers[:actual_count]
-    print(f"\nScaling up by {len(servers_to_wake)} servers...")
+    servers_to_wake = servers_to_consider[:actual_count]
+    
     successfully_woken = []
     
-    # --- Step 1: Update Horovod hostfile first ---
-    hosts_to_update = Counter(s['host'] for s in servers_to_wake)
-    active_hosts_before = read_active_hosts()
-    active_hosts_after = active_hosts_before.copy()
-    
-    for host, num_slots in hosts_to_update.items():
-        if active_hosts_after.get(host, 0) < num_slots:
-            print(f"ERROR: Cannot reclaim {num_slots} from host {host}, only {active_hosts_after.get(host, 0)} are in use. Aborting scale up.")
-            return False
-        active_hosts_after[host] -= num_slots
-    write_active_hosts(active_hosts_after)
-    await asyncio.sleep(3) # Give Horovod time to adjust
-
-    # --- Step 2: Wake up servers one by one ---
+    # This loop now iterates through the prioritized list
     for server in servers_to_wake:
-        if not await check_gpu_memory_is_free(server):
-            print(f"ERROR: GPU memory check failed for rank {server['rank']}. Skipping.")
-            continue
+        if server['shared']:
+            # Coordinated wake-up for shared servers (logic remains the same)
+            active_ranks = read_active_workers()
+            new_ranks = [r for r in active_ranks if r != server['rank']]
+            write_active_workers(new_ranks)
+
+            if not await check_gpu_memory_is_free(server):
+                print(f"ERROR: GPU memory check failed for rank {server['rank']}. Aborting wake-up for this server.")
+                write_active_workers(active_ranks) # Revert
+                continue
         
         await set_server_sleep_state(server, sleep=False)
         server['status'] = 'active'
         successfully_woken.append(server)
 
     if not successfully_woken:
-        print("No servers were woken up. Reverting hostfile change.")
-        write_active_hosts(active_hosts_before)
         return False
 
-    # --- Step 3: Update Nginx ---
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
+        # ... (logging logic remains the same)
         return True
     
-    print("ERROR: Nginx update failed. Reverting state and hostfile...")
-    # Revert status for woken servers and adjust hostfile back
+    # Revert logic if Nginx fails
+    print("ERROR: Nginx update failed. Reverting...")
     for server in successfully_woken:
         server['status'] = 'sleeping'
-    write_active_hosts(active_hosts_before)
+        if server['shared']:
+            ranks = read_active_workers()
+            if server['rank'] not in ranks:
+                ranks.append(server['rank'])
+                write_active_workers(ranks)
     return False
 
 # --- Background Tasks ---
