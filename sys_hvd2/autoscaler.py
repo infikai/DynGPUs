@@ -29,44 +29,81 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
-    # Dedicated inference-only servers (no rank)
-    {"host": "10.10.3.1", "port": 8000, "status": "active", "shared": False},
-    {"host": "10.10.3.1", "port": 8001, "status": "active", "shared": False},
-    {"host": "10.10.3.1", "port": 8002, "status": "sleeping", "rank": 3, "shared": True},
-    {"host": "10.10.3.1", "port": 8003, "status": "sleeping", "rank": 4, "shared": True},
-    {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 5, "shared": True},
+    {"host": "10.10.3.2", "port": 8003, "status": "active", "shared": False},
+    {"host": "10.10.3.2", "port": 8002, "status": "active", "shared": False},
+    {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
+    {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
+    {"host": "10.10.3.1", "port": 8003, "status": "sleeping", "rank": 3, "shared": True},
 ]
 ALL_SHARED_RANKS = [3, 4, 5]
+
+
+# --- 🗺️ Node and Rank Mapping ---
+# Maps server hosts to Horovod node names
+HOST_TO_NODE_MAP = {
+    "10.10.3.1": "node1",
+    "10.10.3.2": "node2"
+}
+# Maps shared ranks to their node name for hostfile logic
+RANK_TO_NODE_MAP = {
+    s['rank']: HOST_TO_NODE_MAP.get(s['host'])
+    for s in ALL_SERVERS if s.get('shared')
+}
+# Base GPU allocation for dedicated training
+BASE_TRAINING_GPUS = {
+    "node1": 3,
+    "node2": 0
+}
 
 
 # --- Helper Functions ---
 
 def read_horovod_hostfile() -> List[int]:
-    """Reads the horovod hostfile, parses the count for node2, and returns the corresponding ranks."""
+    """
+    Reads the horovod hostfile and returns the list of active training ranks
+    by parsing a special comment line that stores the state.
+    """
     try:
         with open(HOROVOD_HOSTFILE_PATH, "r") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("node2:"):
-                    count = int(line.split(':')[1])
-                    active_ranks = sorted(ALL_SHARED_RANKS)[-count:] if count > 0 else []
-                    return active_ranks
-    except (FileNotFoundError, IndexError, ValueError):
+                if line.startswith("# ranks:"):
+                    ranks_str = line.split(':', 1)[1]
+                    if not ranks_str:  # Handles "# ranks:" with nothing after
+                        return []
+                    return [int(r) for r in ranks_str.split(',')]
+    except (FileNotFoundError, ValueError):
+        # If file not found or ranks are malformed, return empty list.
         pass
+    # If the comment is not found, we cannot reliably determine the ranks.
     return []
 
 def write_horovod_hostfile(ranks: List[int]):
     """
-    Counts active shared ranks and writes the result to the horovod hostfile,
-    ensuring node3:4 is always the first line.
+    Writes the horovod hostfile based on active training ranks.
+    Starts with a base configuration and adds shared GPUs from sleeping servers.
+    Also stores the exact list of active ranks in a comment for statefulness.
     """
-    shared_rank_count = len([r for r in ranks if r in ALL_SHARED_RANKS])
+    # Start with the base GPU allocation for dedicated training
+    node_gpu_counts = BASE_TRAINING_GPUS.copy()
     
-    content_lines = ["node3:4"]
+    # Add GPUs from shared servers that are now available for training
+    for rank in ranks:
+        node = RANK_TO_NODE_MAP.get(rank)
+        if node:
+            node_gpu_counts[node] = node_gpu_counts.get(node, 0) + 1
+
+    # First line is a comment to store the state of active ranks
+    sorted_ranks = sorted(ranks)
+    rank_comment = f"# ranks:{','.join(map(str, sorted_ranks))}"
     
-    if shared_rank_count > 0:
-        content_lines.append(f"node2:{shared_rank_count}")
-    
+    content_lines = [rank_comment]
+    # Subsequent lines are for Horovod, with sorted node names for consistency
+    for node in sorted(node_gpu_counts.keys()):
+        count = node_gpu_counts.get(node, 0)
+        if count > 0:
+            content_lines.append(f"{node}:{count}")
+            
     content = "\n".join(content_lines)
     
     with open(HOROVOD_HOSTFILE_PATH, "w") as f:
@@ -158,7 +195,7 @@ async def scale_down(count: int) -> bool:
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
-    # --- POLICY CHANGE: Sort servers to always scale down the LOWEST rank first ---
+    # --- POLICY: Sort servers to always scale down the LOWEST rank first ---
     shared_active_servers.sort(key=lambda s: s.get('rank', -1))
     
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
@@ -197,15 +234,12 @@ async def scale_down(count: int) -> bool:
 
         await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
 
-    num_slots_to_add = len(servers_to_scale_down)
-    print(f"\nAdding {num_slots_to_add} slots back to the training job...")
+    print(f"\nAdding {len(servers_to_scale_down)} slot(s) back to the training job...")
     
     active_ranks_before = read_horovod_hostfile()
-    current_count = len(active_ranks_before)
+    ranks_to_add = [s['rank'] for s in servers_to_scale_down]
     
-    new_count = current_count + num_slots_to_add
-    
-    new_active_ranks = sorted(ALL_SHARED_RANKS)[-new_count:] if new_count > 0 else []
+    new_active_ranks = sorted(list(set(active_ranks_before + ranks_to_add)))
     
     write_horovod_hostfile(new_active_ranks)
     
@@ -324,8 +358,10 @@ async def autoscaler_task():
             print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers)} | Avg Load/Server: {avg_load_per_server:.2f}", end="")
 
             if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
-
-            if avg_load_per_server < SCALE_DOWN_THRESHOLD:
+            
+            # The scaling logic inside the main loop has also been slightly adjusted
+            # to correctly update the rank list.
+            if avg_load_per_server < SCALE_DOWN_THRESHOLD and len(active_servers) > MIN_ACTIVE_SERVERS:
                 scale_factor = avg_load_per_server / SCALE_DOWN_THRESHOLD if SCALE_DOWN_THRESHOLD > 0 else 0
                 num_to_scale = max(1, int(len(active_servers) * (1 - scale_factor)))
                 if await scale_down(count=num_to_scale): last_scaling_time = time.time()
@@ -337,8 +373,13 @@ async def autoscaler_task():
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    if update_nginx_config(ALL_SERVERS):
+    # On startup, ensure Nginx and hostfile are synced with the initial server state
+    initial_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+    if update_nginx_config(initial_active_servers):
         reload_nginx()
+    
+    initial_training_ranks = [s['rank'] for s in ALL_SERVERS if s.get('shared') and s['status'] == 'sleeping']
+    write_horovod_hostfile(initial_training_ranks)
 
     loop = asyncio.get_event_loop()
     loop.create_task(log_active_servers())
