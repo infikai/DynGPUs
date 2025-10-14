@@ -32,9 +32,9 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1 # --- NEW: How often to check the GPU memory 
 ALL_SERVERS = [
     {"host": "10.10.3.2", "port": 8003, "status": "active", "shared": False},
     {"host": "10.10.3.2", "port": 8002, "status": "active", "shared": False},
-    {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
-    {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
     {"host": "10.10.3.1", "port": 8003, "status": "sleeping", "rank": 3, "shared": True},
+    {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
+    {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
 ]
 
 
