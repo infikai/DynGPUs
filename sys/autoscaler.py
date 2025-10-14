@@ -128,28 +128,28 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
 
 async def scale_down(count: int) -> bool:
     """
-    Scales down, targeting ONLY shared servers to free GPUs for training.
-    Dedicated servers will not be scaled down.
+    Scales down gracefully, targeting ONLY shared servers. It removes them from Nginx,
+    waits for them to be idle, puts them to sleep, and then returns their GPUs to the
+    training pool in a single batch operation.
     """
     start_time = time.time()
     
-    # --- CHANGE: Only consider SHARED servers for scale-down ---
+    # --- Step 1: Select which servers to scale down ---
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
-    # Determine how many servers we can possibly remove
+    # Determine how many servers can actually be removed
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
-    
-    # We can only remove shared servers, up to the count requested, and without violating the minimum
     actual_count = min(count, len(shared_active_servers), max_possible_to_remove)
     
     if actual_count <= 0:
         print("\nScale-down skipped: No shared servers available to scale down or minimum would be breached.")
         return False
 
-    # Select the shared servers to be scaled down
+    # The list of servers that will be shut down
     servers_to_scale_down = shared_active_servers[:actual_count]
     
+    # --- Step 2: Remove servers from Nginx load balancer ---
     for server in servers_to_scale_down:
         server['status'] = 'sleeping'
     
@@ -161,26 +161,40 @@ async def scale_down(count: int) -> bool:
         return False
     reload_nginx()
     
-    # The rest of the graceful shutdown logic remains the same
+    # --- Step 3: Concurrently wait for each server to be idle, then put it to sleep ---
     async with httpx.AsyncClient() as client:
-        async def wait_sleep_and_coordinate(s):
+        async def wait_and_sleep(s):
+            """Helper to handle graceful shutdown for one server."""
             print(f"\nGracefully shutting down shared server {s['host']}:{s['port']}...")
-            # ... (graceful shutdown logic: wait for idle) ...
-            await set_server_sleep_state(s, sleep=True)
+            wait_start_time = time.time()
+            while (time.time() - wait_start_time) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
+                metrics = await get_server_metrics(s, client)
+                if metrics.get("running", -1) == 0:
+                    print(f"Server {s['host']}:{s['port']} is now idle.")
+                    break
+                await asyncio.sleep(2)
+            else:
+                print(f"\nWARN: Timeout reached waiting for {s['host']}:{s['port']} to become idle. Forcing sleep.")
             
-            # Add its rank back to the training pool
-            print(f"Adding rank {s['rank']} back to the training job...")
-            active_ranks = read_active_workers()
-            if s['rank'] not in active_ranks:
-                active_ranks.append(s['rank'])
-                write_active_workers(active_ranks)
+            await set_server_sleep_state(s, sleep=True)
 
-        await asyncio.gather(*[wait_sleep_and_coordinate(s) for s in servers_to_scale_down])
+        await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
 
+    # --- Step 4: Update the training job file in a single batch operation ---
+    ranks_to_add = [s['rank'] for s in servers_to_scale_down]
+    print(f"\nAdding ranks {ranks_to_add} back to the training job...")
+    active_ranks = read_active_workers()
+    for rank in ranks_to_add:
+        if rank not in active_ranks:
+            active_ranks.append(rank)
+    write_active_workers(active_ranks)
+    
+    # --- Step 5: Log the total duration of the event ---
     total_duration = time.time() - start_time
     log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Full scale-down of {actual_count} shared server(s) took {total_duration:.2f}s.\n"
     with open(SERVER_COUNT_LOG_FILE, "a") as f:
         f.write(log_entry)
+        
     return True
 
 async def scale_up(count: int) -> bool:
@@ -197,16 +211,25 @@ async def scale_up(count: int) -> bool:
     servers_to_wake = servers_to_consider[:actual_count]
     successfully_woken = []
 
-    for server in servers_to_wake:
-        if server['shared']:
-            active_ranks = read_active_workers()
-            new_ranks = [r for r in active_ranks if r != server['rank']]
-            write_active_workers(new_ranks)
-            if not await check_gpu_memory_is_free(server):
-                print(f"ERROR: GPU memory check failed for rank {server['rank']}. Aborting wake-up.")
-                write_active_workers(active_ranks) # Revert
-                continue
+    # --- CHANGE: Batch update the training worker file ONCE at the beginning ---
+    shared_servers_to_wake = [s for s in servers_to_wake if s['shared']]
+    if shared_servers_to_wake:
+        original_active_ranks = read_active_workers()
+        ranks_to_remove = [s['rank'] for s in shared_servers_to_wake]
+        print(f"\nRequesting to remove ranks {ranks_to_remove} from the training job...")
         
+        new_active_ranks = [r for r in original_active_ranks if r not in ranks_to_remove]
+        write_active_workers(new_active_ranks)
+        
+        # Check memory for all shared servers before proceeding
+        memory_checks = await asyncio.gather(*[check_gpu_memory_is_free(s) for s in shared_servers_to_wake])
+        if not all(memory_checks):
+            print("ERROR: GPU memory check failed for one or more servers. Aborting scale-up and reverting training file.")
+            write_active_workers(original_active_ranks) # Revert
+            return False
+
+    # --- Proceed to wake up all selected servers ---
+    for server in servers_to_wake:
         await set_server_sleep_state(server, sleep=False)
         server['status'] = 'active'
         successfully_woken.append(server)
@@ -222,11 +245,9 @@ async def scale_up(count: int) -> bool:
     print("ERROR: Nginx update failed. Reverting...")
     for server in successfully_woken:
         server['status'] = 'sleeping'
-        if server['shared']:
-            ranks = read_active_workers()
-            if server['rank'] not in ranks:
-                ranks.append(server['rank'])
-                write_active_workers(ranks)
+    # If we had shared servers, revert the training file as well
+    if shared_servers_to_wake:
+        write_active_workers(original_active_ranks)
     return False
 
 # --- Background Tasks ---
