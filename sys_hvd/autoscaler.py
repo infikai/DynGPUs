@@ -153,7 +153,6 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
 
 # --- Scaling Logic ---
 
-# --- CORRECTED FUNCTION ---
 async def scale_down(count: int) -> bool:
     """
     Scales down gracefully by shutting down the N highest-ranked shared servers.
@@ -163,6 +162,7 @@ async def scale_down(count: int) -> bool:
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
+    # --- POLICY: Sort servers to always scale down the HIGHEST rank first ---
     shared_active_servers.sort(key=lambda s: s.get('rank', -1), reverse=True)
     
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
@@ -201,22 +201,16 @@ async def scale_down(count: int) -> bool:
 
         await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
 
-    # --- CHANGE: Logic now operates on counts, not lists of ranks ---
     num_slots_to_add = len(servers_to_scale_down)
     print(f"\nAdding {num_slots_to_add} slots back to the training job...")
     
-    # Read the current count of active training ranks
     active_ranks_before = read_horovod_hostfile()
     current_count = len(active_ranks_before)
     
-    # Calculate the new count
     new_count = current_count + num_slots_to_add
     
-    # Generate a representative list of ranks for the new count
-    # This keeps the write function's interface consistent
     new_active_ranks = sorted(ALL_SHARED_RANKS)[-new_count:] if new_count > 0 else []
     
-    # Write the new state back to the file
     write_horovod_hostfile(new_active_ranks)
     
     total_duration = time.time() - start_time
@@ -303,6 +297,7 @@ async def scale_up(count: int) -> bool:
 # --- Background Tasks ---
 
 async def log_active_servers():
+    """Logs the number of active servers to a file every second."""
     print(f"📝 Logging active server count to {SERVER_COUNT_LOG_FILE}...")
     while True:
         try:
@@ -313,6 +308,7 @@ async def log_active_servers():
         await asyncio.sleep(1)
 
 async def autoscaler_task():
+    """The main autoscaler loop that polls server metrics and triggers scaling."""
     print("🚀 Autoscaler started...")
     last_scaling_time = 0
     async with httpx.AsyncClient() as client:
