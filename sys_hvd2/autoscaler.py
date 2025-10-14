@@ -97,7 +97,7 @@ def write_horovod_hostfile(ranks: List[int]):
     sorted_ranks = sorted(ranks)
     rank_comment = f"# ranks:{','.join(map(str, sorted_ranks))}"
     
-    content_lines = [rank_comment]
+    content_lines = []
     # Subsequent lines are for Horovod, with sorted node names for consistency
     for node in sorted(node_gpu_counts.keys()):
         count = node_gpu_counts.get(node, 0)
