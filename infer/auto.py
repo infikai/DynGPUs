@@ -86,7 +86,7 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
     print(f"{action}: {server['host']}:{server['port']}")
     try:
         async with httpx.AsyncClient() as client:
-            await client.post(url, timeout=20)
+            await client.post(url, timeout=30)
     except httpx.RequestError as e:
         print(f"\nERROR: Could not send command to server {server['host']}:{server['port']}: {e}")
 
