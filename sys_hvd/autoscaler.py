@@ -160,7 +160,23 @@ async def scale_down(count: int) -> bool:
     reload_nginx()
     
     # Gracefully shut down servers, then update hostfile once.
-    await asyncio.gather(*[set_server_sleep_state(s, sleep=True) for s in servers_to_scale_down])
+    async with httpx.AsyncClient() as client:
+        async def wait_and_sleep(s):
+            """Helper to handle graceful shutdown for one server."""
+            print(f"\nGracefully shutting down shared server {s['host']}:{s['port']}...")
+            wait_start_time = time.time()
+            while (time.time() - wait_start_time) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
+                metrics = await get_server_metrics(s, client)
+                if metrics.get("running", -1) == 0:
+                    print(f"Server {s['host']}:{s['port']} is now idle.")
+                    break
+                await asyncio.sleep(2)
+            else:
+                print(f"\nWARN: Timeout reached waiting for {s['host']}:{s['port']} to become idle. Forcing sleep.")
+            
+            await set_server_sleep_state(s, sleep=True)
+
+        await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
     
     hosts_to_update = Counter(s['host'] for s in servers_to_scale_down)
     active_hosts = read_active_hosts()
@@ -195,7 +211,7 @@ async def scale_up(count: int) -> bool:
             return False
         active_hosts_after[host] -= num_slots
     write_active_hosts(active_hosts_after)
-    await asyncio.sleep(5) # Give Horovod time to adjust
+    await asyncio.sleep(3) # Give Horovod time to adjust
 
     # --- Step 2: Wake up servers one by one ---
     for server in servers_to_wake:
