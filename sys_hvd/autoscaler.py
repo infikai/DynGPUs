@@ -79,10 +79,6 @@ def write_horovod_hostfile(ranks: List[int]):
 
 
 async def check_gpu_memory_is_free(server: Dict) -> bool:
-    """
-    Connects to a server via SSH and polls nvidia-smi until the GPU's memory
-    is below a threshold or a timeout is reached.
-    """
     if not server.get("shared"):
         return True
 
@@ -113,7 +109,6 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
     return False
 
 async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
-    """Fetches and parses metrics from a vLLM server's /metrics endpoint."""
     url = f"http://{server['host']}:{server['port']}/metrics"
     running, waiting = 0.0, 0.0
     try:
@@ -128,7 +123,6 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
     return {"running": running, "waiting": waiting}
 
 async def update_nginx_config(active_servers: List[Dict]) -> bool:
-    """Generates and writes a new nginx.conf from a template."""
     print("\nUpdating Nginx configuration...")
     upstream_servers = "".join([f"        server {s['host']}:{s['port']};\n" for s in active_servers])
     try:
@@ -140,7 +134,6 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
         print(f"\nERROR: Failed to write Nginx config: {e}"); return False
 
 def reload_nginx():
-    """Executes the command to reload Nginx gracefully."""
     print("Reloading Nginx...")
     try:
         subprocess.run(["sudo", "nginx", "-s", "reload"], check=True)
@@ -149,7 +142,6 @@ def reload_nginx():
         print(f"\nERROR: Failed to reload Nginx: {e}")
 
 async def set_server_sleep_state(server: Dict, sleep: bool):
-    """Sends a POST request to put a server to sleep or wake it up."""
     action, url = ("Putting to sleep", f"http://{server['host']}:{server['port']}/sleep?level=1") if sleep else \
                   ("Waking up", f"http://{server['host']}:{server['port']}/wake_up")
     print(f"{action}: {server['host']}:{server['port']}")
@@ -161,6 +153,7 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
 
 # --- Scaling Logic ---
 
+# --- CORRECTED FUNCTION ---
 async def scale_down(count: int) -> bool:
     """
     Scales down gracefully by shutting down the N highest-ranked shared servers.
@@ -170,7 +163,6 @@ async def scale_down(count: int) -> bool:
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
-    # --- CHANGE: Sort servers to always scale down the highest rank first ---
     shared_active_servers.sort(key=lambda s: s.get('rank', -1), reverse=True)
     
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
@@ -209,13 +201,23 @@ async def scale_down(count: int) -> bool:
 
         await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
 
-    ranks_to_add = [s['rank'] for s in servers_to_scale_down]
-    print(f"\nAdding ranks {ranks_to_add} back to the training job...")
-    active_ranks = read_horovod_hostfile()
-    for rank in ranks_to_add:
-        if rank not in active_ranks:
-            active_ranks.append(rank)
-    write_horovod_hostfile(active_ranks)
+    # --- CHANGE: Logic now operates on counts, not lists of ranks ---
+    num_slots_to_add = len(servers_to_scale_down)
+    print(f"\nAdding {num_slots_to_add} slots back to the training job...")
+    
+    # Read the current count of active training ranks
+    active_ranks_before = read_horovod_hostfile()
+    current_count = len(active_ranks_before)
+    
+    # Calculate the new count
+    new_count = current_count + num_slots_to_add
+    
+    # Generate a representative list of ranks for the new count
+    # This keeps the write function's interface consistent
+    new_active_ranks = sorted(ALL_SHARED_RANKS)[-new_count:] if new_count > 0 else []
+    
+    # Write the new state back to the file
+    write_horovod_hostfile(new_active_ranks)
     
     total_duration = time.time() - start_time
     log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Took {total_duration:.2f}s for {actual_count} server(s).\n"
@@ -224,7 +226,6 @@ async def scale_down(count: int) -> bool:
         
     return True
 
-# --- RECONSTRUCTED FUNCTION ---
 async def scale_up(count: int) -> bool:
     """
     Scales up by waking servers, using a single batch update for the hostfile.
@@ -244,7 +245,6 @@ async def scale_up(count: int) -> bool:
         
     servers_to_wake = servers_to_consider[:actual_count]
     
-    # --- Step 1: Perform a single batch update to the hostfile ---
     shared_servers_to_wake = [s for s in servers_to_wake if s['shared']]
     active_ranks_before = read_horovod_hostfile()
     
@@ -254,9 +254,8 @@ async def scale_up(count: int) -> bool:
         
         new_ranks = [r for r in active_ranks_before if r not in ranks_to_remove]
         write_horovod_hostfile(new_ranks)
-        await asyncio.sleep(5) # Give Horovod time to release GPUs
+        await asyncio.sleep(5)
 
-    # --- Step 2: Wake up servers and handle GPU memory checks ---
     successfully_woken = []
     failed_ranks = []
     
@@ -273,7 +272,6 @@ async def scale_up(count: int) -> bool:
             server['status'] = 'active'
             successfully_woken.append(server)
 
-    # --- Step 3: Revert any ranks that failed the memory check ---
     if failed_ranks:
         print(f"Adding failed ranks {failed_ranks} back to the training job...")
         current_ranks = read_horovod_hostfile()
@@ -284,12 +282,10 @@ async def scale_up(count: int) -> bool:
         print("No servers were successfully woken up.")
         return False
 
-    # --- Step 4: Update Nginx and handle final revert on failure ---
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
         return True
     
-    # This block runs only if Nginx update fails
     print("ERROR: Nginx update failed. Reverting all woken servers...")
     ranks_to_re_add = []
     for server in successfully_woken:
@@ -307,7 +303,6 @@ async def scale_up(count: int) -> bool:
 # --- Background Tasks ---
 
 async def log_active_servers():
-    """Logs the number of active servers to a file every second."""
     print(f"📝 Logging active server count to {SERVER_COUNT_LOG_FILE}...")
     while True:
         try:
@@ -318,7 +313,6 @@ async def log_active_servers():
         await asyncio.sleep(1)
 
 async def autoscaler_task():
-    """The main autoscaler loop that polls server metrics and triggers scaling."""
     print("🚀 Autoscaler started...")
     last_scaling_time = 0
     async with httpx.AsyncClient() as client:
