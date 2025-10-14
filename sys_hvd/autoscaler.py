@@ -162,7 +162,7 @@ async def scale_down(count: int) -> bool:
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
-    # --- POLICY: Sort servers to always scale down the HIGHEST rank first ---
+    # POLICY: Sort servers to always scale down the HIGHEST rank first
     shared_active_servers.sort(key=lambda s: s.get('rank', -1), reverse=True)
     
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
@@ -222,13 +222,15 @@ async def scale_down(count: int) -> bool:
 
 async def scale_up(count: int) -> bool:
     """
-    Scales up by waking servers, using a single batch update for the hostfile.
-    Prioritizes dedicated servers, then shared servers with the highest rank.
+    Scales up by waking servers, prioritizing dedicated servers, then shared
+    servers with the LOWEST rank.
     """
     all_sleeping = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
     dedicated_sleeping = [s for s in all_sleeping if not s['shared']]
     shared_sleeping = [s for s in all_sleeping if s['shared']]
-    shared_sleeping.sort(key=lambda s: s['rank'], reverse=True)
+    
+    # --- POLICY CHANGE: Sort servers to always scale up the LOWEST rank first ---
+    shared_sleeping.sort(key=lambda s: s['rank']) # Removed reverse=True
     
     servers_to_consider = dedicated_sleeping + shared_sleeping
     
