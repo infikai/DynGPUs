@@ -190,9 +190,9 @@ def train(state):
                 print(f'Batch time: {end_batch - start_batch}s; Allreduce time: {end_batch - start_op}s')
 
 
-    if log_writer:
-        log_writer.add_scalar('train/loss', train_loss.avg, epoch)
-        log_writer.add_scalar('train/accuracy', train_accuracy.avg, epoch)
+    # if log_writer:
+    #     log_writer.add_scalar('train/loss', train_loss.avg, epoch)
+    #     log_writer.add_scalar('train/accuracy', train_accuracy.avg, epoch)
 
     state.commit()
 
