@@ -81,7 +81,7 @@ parser.add_argument('--sleep', type=int, default=0,
 def train(state):
     global last_log_time
     # Log when train() is called, which happens initially and after a host update
-    if hvd.rank() == 0:
+    if hvd.rank() == 1:
         logging.info('Train() has been called.')
     print(f'Train() been called in rank {hvd.rank()}')
     start_modeltrain = time.time()
@@ -96,7 +96,7 @@ def train(state):
     start_init_loop = time.time()
     for idx, (data, target) in enumerate(train_loader):
         # Time-based logging every 10 seconds on rank 0
-        if hvd.rank() == 0 and time.time() - last_log_time > 10:
+        if hvd.rank() == 1 and time.time() - last_log_time > 10:
             epoch = state.epoch
             processed_num = state.train_sampler.state_dict()['processed_num']
             logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed_num}')
@@ -117,7 +117,7 @@ def train(state):
             print(f'state commited! took {end - start}s')
         elif args.batches_per_host_check > 0 and \
                 state.batch % args.batches_per_host_check == 0:
-            if hvd.rank() == 0:
+            if hvd.rank() == 1:
                 logging.info("Calling check_host_updates().")
             state.check_host_updates()
 
@@ -264,7 +264,7 @@ def end_epoch(state):
     state.epoch += 1
     state.batch = 0
     state.train_sampler.set_epoch(state.epoch)
-    state.commit()
+    # state.commit()
 
 
 # Horovod: average metrics from distributed training.
@@ -309,7 +309,7 @@ if __name__ == '__main__':
     print(f'hvd init Time: {time.time() - start_hvdInit}s')
     
     # Configure logging to a file, only for the master worker (rank 0)
-    if hvd.rank() == 0:
+    if hvd.rank() == 1:
         logging.basicConfig(filename='worker_adjustments.log',
                             level=logging.INFO,
                             format='%(asctime)s - %(message)s',
@@ -329,12 +329,12 @@ if __name__ == '__main__':
     verbose = 1 if hvd.rank() == 0 else 0
 
     # Horovod: write TensorBoard logs on first worker.
-    log_writer = SummaryWriter(args.log_dir) if hvd.rank() == 0 else None
+    # log_writer = SummaryWriter(args.log_dir) if hvd.rank() == 0 else None
 
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(4)
 
-    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
+    kwargs = {'num_workers': 2, 'pin_memory': True} if args.cuda else {}
     # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
     # issues with Infiniband implementations that are not fork-safe
     if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
