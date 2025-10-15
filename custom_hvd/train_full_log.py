@@ -179,6 +179,7 @@ def main():
                         allreduce_name = f"grads_set_{ranks_str}"
                     allreduce_gradients_manual(model, active_set, name=allreduce_name)
                     base_optimizer.step()
+                    print(f'One Batch Cost: {time.time() - ST_batch}s')
                     sampler.record_batch(state.batch_idx, args.batch_size)
                     state.batch_idx += 1
                     state.processed_num = sampler.get_processed_num()
