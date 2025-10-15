@@ -81,7 +81,7 @@ parser.add_argument('--sleep', type=int, default=0,
 def train(state):
     global last_log_time
     # Log when train() is called, which happens initially and after a host update
-    if hvd.rank() == 3:
+    if hvd.rank() == 2:
         logging.info('Train() has been called.')
     print(f'Train() been called in rank {hvd.rank()}')
     start_modeltrain = time.time()
@@ -96,7 +96,7 @@ def train(state):
     start_init_loop = time.time()
     for idx, (data, target) in enumerate(train_loader):
         # Time-based logging every 10 seconds on rank 0
-        if hvd.rank() == 3 and time.time() - last_log_time > 10:
+        if hvd.rank() == 2 and time.time() - last_log_time > 10:
             epoch = state.epoch
             processed_num = state.train_sampler.state_dict()['processed_num']
             logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed_num}')
@@ -307,7 +307,7 @@ if __name__ == '__main__':
     print(f'hvd init Time: {time.time() - start_hvdInit}s')
     
     # Configure logging to a file, only for the master worker (rank 0)
-    if hvd.rank() == 3:
+    if hvd.rank() == 2:
         logging.basicConfig(filename='worker_adjustments.log',
                             level=logging.INFO,
                             format='%(asctime)s - %(message)s',
