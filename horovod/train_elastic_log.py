@@ -80,6 +80,13 @@ parser.add_argument('--sleep', type=int, default=0,
 
 def train(state):
     global last_log_time
+    # Configure logging to a file, only for the master worker (rank 0)
+    if hvd.rank() == 2:
+        logging.basicConfig(filename='worker_adjustments.log',
+                            level=logging.INFO,
+                            format='%(asctime)s - %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
+        logging.info("Starting training run.")
     # Log when train() is called, which happens initially and after a host update
     if hvd.rank() == 2:
         logging.info('Train() has been called.')
@@ -306,13 +313,7 @@ if __name__ == '__main__':
     hvd.init()
     print(f'hvd init Time: {time.time() - start_hvdInit}s')
     
-    # Configure logging to a file, only for the master worker (rank 0)
-    if hvd.rank() == 2:
-        logging.basicConfig(filename='worker_adjustments.log',
-                            level=logging.INFO,
-                            format='%(asctime)s - %(message)s',
-                            datefmt='%Y-%m-%d %H:%M:%S')
-        logging.info("Starting training run.")
+    
 
     torch.manual_seed(args.seed)
 
