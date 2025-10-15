@@ -174,9 +174,9 @@ def calculate_metrics(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="A client for benchmarking vLLM API server with a trace file.")
     parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8888)
     parser.add_argument("--endpoint", type=str, default="/v1/completions")
-    parser.add_argument("--model-name", type=str, required=True, help="The name of the model being served.")
+    parser.add_argument("--model-name", type=str, default="NousResearch/Meta-Llama-3-8B-Instruct", help="The name of the model being served.")
     parser.add_argument("--trace-file", type=str, required=True, help="Path to the JSONL trace file.")
     parser.add_argument("--duration", type=int, default=None, help="Benchmark duration in seconds. If set, stops sending new requests after this time.")
     
