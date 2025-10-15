@@ -117,8 +117,6 @@ def train(state):
             print(f'state commited! took {end - start}s')
         elif args.batches_per_host_check > 0 and \
                 state.batch % args.batches_per_host_check == 0:
-            if hvd.rank() == 3:
-                logging.info("Calling check_host_updates().")
             state.check_host_updates()
 
         adjust_learning_rate(epoch, batch_idx)
