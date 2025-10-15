@@ -139,7 +139,7 @@ def main():
                     local_rank = current_active_ranks.index(hvd.rank())
                     sampler = MyElasticSampler(train_dataset)
                     sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
-                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=2, sampler=sampler)
+                    loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
                     data_iterator = iter(loader)
 
                 config_change_duration = time.time() - ST_config
