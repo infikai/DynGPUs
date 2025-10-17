@@ -65,6 +65,7 @@ def main():
     state = TrainingState()
     current_active_ranks = []
     process_set_cache = {}
+    first_run = True
 
     # Train
     while state.epoch < EPOCHS:
@@ -152,7 +153,7 @@ def main():
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
 
-                    if hvd_optimizer:
+                    if not first_run:
                         del hvd_optimizer
                     if active_set is None:
                         hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters())
