@@ -327,7 +327,7 @@ if __name__ == '__main__':
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(4)
 
-    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
+    kwargs = {'num_workers': 2, 'pin_memory': True} if args.cuda else {}
     # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
     # issues with Infiniband implementations that are not fork-safe
     if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
