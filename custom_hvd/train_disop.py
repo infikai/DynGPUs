@@ -11,6 +11,8 @@ import os
 import socket
 from sampler import MyElasticSampler
 import argparse # MODIFICATION: Import argparse
+import copy
+
 
 # Hyperparameters
 EPOCHS = 100
@@ -51,6 +53,8 @@ def main():
     else:
         # This case is technically handled by 'choices' in argparse, but it's good practice
         raise ValueError(f"Unsupported model specified: {args.model}")
+    
+    bk_model = copy.deepcopy(model)
 
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     train_dataset = datasets.ImageFolder(
