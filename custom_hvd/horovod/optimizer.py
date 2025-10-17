@@ -81,6 +81,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
 
         self._handles = {}
         self._grad_accs = []
+        self._hook_handles = {}  # To store hook handles for removal
         self._requires_update = set()
         self._synchronized = False
         self._should_synchronize = True
@@ -170,8 +171,18 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                     self._requires_update.add(p)
                     p_tmp = p.expand_as(p)
                     grad_acc = p_tmp.grad_fn.next_functions[0][0]
-                    grad_acc.register_hook(self._make_hook(p))
+                    # Store the handle returned by register_hook
+                    handle = grad_acc.register_hook(self._make_hook(p))
+                    self._hook_handles[p] = handle
                     self._grad_accs.append(grad_acc)
+
+    def _unregister_hooks(self):
+        """
+        Removes all registered gradient hooks.
+        """
+        for p, handle in self._hook_handles.items():
+            handle.remove()
+        self._hook_handles.clear() # Clear the dictionary after removing
 
     def _allreduce_grad_async(self, p):
         if p.grad is None:
