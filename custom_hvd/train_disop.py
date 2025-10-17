@@ -152,6 +152,8 @@ def main():
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
 
+                    if hvd_optimizer:
+                        del hvd_optimizer
                     if active_set is None:
                         hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters())
                     else:
