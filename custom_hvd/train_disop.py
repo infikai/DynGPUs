@@ -158,7 +158,7 @@ def main():
                     print('==='*5)
 
                     if not first_run:
-                        del hvd_optimizer
+                        hvd_optimizer._unregister_hooks()
                     if active_set is None:
                         hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters())
                     else:
@@ -189,7 +189,8 @@ def main():
             if new_ranks != current_active_ranks:
                 config_changed = True
                 break
-
+            
+            first_run = False
             if hvd.rank() in current_active_ranks:
                 try:
                     print('Training:')
