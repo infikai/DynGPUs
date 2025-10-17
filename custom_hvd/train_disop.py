@@ -54,7 +54,7 @@ def main():
 
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     train_dataset = datasets.ImageFolder(
-        os.path.join('/mydata/Data/imagenet', 'train'),
+        os.path.join('/localdata/Data/imagenet', 'train'),
         transform=transforms.Compose([
             transforms.RandomResizedCrop(224),
             transforms.RandomHorizontalFlip(),
