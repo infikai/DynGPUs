@@ -54,7 +54,7 @@ def main():
         # This case is technically handled by 'choices' in argparse, but it's good practice
         raise ValueError(f"Unsupported model specified: {args.model}")
     
-    bk_model = copy.deepcopy(model)
+    # bk_model = copy.deepcopy(model)
 
     base_optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     train_dataset = datasets.ImageFolder(
