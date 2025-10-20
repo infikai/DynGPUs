@@ -181,6 +181,7 @@ def main():
                 print(f'Config Change Cost: {time.time() - ST_config}s')
                 config_changed = False
 
+            ST_file = time.time()
             if hvd.rank() == 0:
                 new_ranks = read_active_ranks_from_file()
             else:
@@ -189,6 +190,7 @@ def main():
             if new_ranks != current_active_ranks:
                 config_changed = True
                 break
+            print(f'File Cost: {time.time() - ST_file}s')
             
             first_run = False
             if hvd.rank() in current_active_ranks:
