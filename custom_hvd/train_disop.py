@@ -15,7 +15,7 @@ import copy
 
 
 # Hyperparameters
-EPOCHS = 100
+EPOCHS = 1
 # BATCH_SIZE = 128 # MODIFICATION: Removed hardcoded batch size
 
 class TrainingState:
