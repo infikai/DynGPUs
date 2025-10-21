@@ -71,34 +71,79 @@ class Scheduler:
         elif job.job_type == 'llm_inference':
             return self._dispatch_llm_inference_job(job)
         return False
+    
+    def _batch_dispatch_llm_jobs(self, llm_jobs):
+        """Dispatches a batch of LLM jobs efficiently."""
+        if not llm_jobs:
+            return []
+
+        num_jobs = len(llm_jobs)
+        
+        # 1. Get all possible GPU slots from active servers, idle GPUs, or by preempting.
+        available_slots, victims_to_preempt = self.cluster.find_resources_for_llm_batch(num_jobs)
+        
+        # 2. Perform all necessary preemptions found in the previous step.
+        if victims_to_preempt:
+            gpus_preempted = set()
+            for victim_job, victim_gpu in victims_to_preempt:
+                if victim_gpu.gpu_id not in gpus_preempted:
+                    victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+                    self.preemption_map[victim_gpu.gpu_id] = victim_job
+                    self.preemption_count += 1
+                    gpus_preempted.add(victim_gpu.gpu_id)
+
+        # 3. Assign jobs to the pool of available slots.
+        assigned_count = 0
+        for i, job in enumerate(llm_jobs):
+            if i < len(available_slots):
+                gpu = available_slots[i]
+                job.assigned_gpus = [gpu]
+                job.start_time = self.clock.current_time
+                gpu.assign_llm_task(job)
+                self.running_jobs.append(job)
+                assigned_count += 1
+            else:
+                # Stop if we run out of slots.
+                break 
+    
+        # 4. Return any jobs that couldn't be scheduled.
+        unassigned_jobs = llm_jobs[assigned_count:]
+        return unassigned_jobs
 
     def _dispatch_llm_inference_job(self, job):
-        """Schedules a single LLM inference request, using preemption if no slots are free."""
+        """
+        Schedules a single LLM inference request, using preemption if necessary.
+        This function is kept for consistency, but the main loop uses the batch dispatcher.
+        """
+        # 1. Use the corrected finder to get a GPU that is either an
+        #    active LLM server with slots or an idle GPU ready for conversion.
         gpu = self.cluster.find_gpu_for_llm_job()
         
-        # NEW: If no GPU with a free slot is found, try to preempt a training job
+        # 2. If no GPU is readily available, try to free one up via preemption.
         if not gpu:
             victim_job, victim_gpu = self.cluster.find_preemptible_job()
             if victim_job and victim_gpu:
-                print(f" preempting {victim_job} on {victim_gpu} for {job}")
-                # Preempt the training job to free up the entire GPU
+                # Preempting the training job makes its GPU idle and thus convertible.
                 victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
                 self.preemption_map[victim_gpu.gpu_id] = victim_job
                 self.preemption_count += 1
                 
-                # The now-empty GPU is assigned to the LLM job
+                # The newly freed GPU is our target.
                 gpu = victim_gpu
         
-        # Proceed with assignment if a GPU was found or freed
+        # 3. If we have a GPU (either found or freed), assign the job.
         if gpu:
             job.assigned_gpus = [gpu]
             job.start_time = self.clock.current_time
+            
+            # The assign_llm_task method handles the conversion to an exclusive-use server.
             gpu.assign_llm_task(job)
             
             self.running_jobs.append(job)
             return True
             
-        return False # Wait if no slots are free and no preemption is possible
+        # 4. If no GPU could be found or freed, the job must wait.
+        return False
 
     def _dispatch_inference_job(self, job):
         """Routes an inference job to the correct scheduler based on its size."""
@@ -198,33 +243,7 @@ class Scheduler:
             
         # If the training pool did not have enough GPUs, the job cannot be scheduled and must wait.
         return False
-
-    def _apply_dynamic_policy(self):
-        """Checks inference workload and partially locks/unlocks sharable GPUs."""
-        avg_util = self.cluster.get_inference_pool_utilization()
-        
-        if avg_util > HIGH_UTIL_THRESHOLD:
-            idle_sharable_gpus = self.cluster.get_idle_sharable_gpus()
-            num_to_lock = math.floor(len(idle_sharable_gpus) * PARTIAL_LOCK_FRACTION)
-            
-            if num_to_lock > 0:
-                gpus_to_lock = idle_sharable_gpus[:num_to_lock]
-                self.cluster.lock_gpus(gpus_to_lock)
-                print(f"🔥 Policy Trigger: Inference util at {avg_util:.1f}%. Locking {num_to_lock} sharable GPUs.")
-                
-        elif avg_util < LOW_UTIL_THRESHOLD:
-            locked_gpus = self.cluster.get_locked_gpus()
-            num_to_unlock = math.ceil(len(locked_gpus) * PARTIAL_LOCK_FRACTION)
-
-            if num_to_unlock > 0:
-                gpus_to_unlock = locked_gpus[:num_to_unlock]
-                self.cluster.unlock_gpus(gpus_to_unlock)
-                print(f"💧 Policy Trigger: Inference util at {avg_util:.1f}%. Unlocking {num_to_unlock} GPUs.")
-
-        locked_count = len(self.cluster.get_locked_gpus())
-        if locked_count > self.max_locked_gpus:
-            self.max_locked_gpus = locked_count
-            
+         
     def _handle_job_completion(self, job):
         """Processes a finished job, logs training data, and handles reclamation."""
         freed_gpus = list(job.assigned_gpus)
@@ -290,8 +309,6 @@ class Scheduler:
             self.clock.tick()
 
             if self.clock.current_time > 0:
-                if self.clock.current_time % self.policy_interval == 0:
-                    self._apply_dynamic_policy()
                 if self.clock.current_time % self.log_interval == 0:
                     self._log_gpu_usage()
             
@@ -306,18 +323,29 @@ class Scheduler:
             #         break
 
             # ** MODIFIED: New dispatch loop to prevent head-of-line blocking **
-            jobs_to_retry = []
+            arrived_jobs = []
             while self.pending_jobs and self.pending_jobs[0].arrival_time <= self.clock.current_time:
-                job_to_dispatch = self.pending_jobs.popleft()
-                if not self._dispatch_job(job_to_dispatch):
-                    # If dispatch fails, add it to a temporary list to retry next tick.
-                    jobs_to_retry.append(job_to_dispatch)
-            
-            # Add failed jobs back to the front of the queue for the next tick.
-            if jobs_to_retry:
-                jobs_to_retry.reverse() # Ensure original order is maintained
-                for job in jobs_to_retry:
-                    self.pending_jobs.appendleft(job)
+                arrived_jobs.append(self.pending_jobs.popleft())
+
+            if arrived_jobs:
+                # 2. Separate LLM jobs from all other types
+                arrived_llm_jobs = [j for j in arrived_jobs if j.job_type == 'llm_inference']
+                other_arrived_jobs = [j for j in arrived_jobs if j.job_type != 'llm_inference']
+                
+                # 3. Process the LLM jobs in a single, efficient batch
+                unassigned_llm_jobs = self._batch_dispatch_llm_jobs(arrived_llm_jobs)
+
+                # 4. Process other jobs (training, regular inference) one-by-one
+                unassigned_other_jobs = []
+                for job in other_arrived_jobs:
+                    if not self._dispatch_job(job):
+                        unassigned_other_jobs.append(job)
+
+                # 5. Add any jobs that couldn't be scheduled back to the front of the queue
+                all_unassigned = sorted(unassigned_llm_jobs + unassigned_other_jobs, key=lambda j: j.arrival_time, reverse=True)
+                if all_unassigned:
+                    for job in all_unassigned:
+                        self.pending_jobs.appendleft(job)
 
             finished_this_tick = []
             for job in self.running_jobs:
