@@ -40,38 +40,38 @@ class Scheduler:
         self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,borrowed_inference_gpus\n")
 
     def _log_gpu_usage(self):
-    """
-    Logs a snapshot of GPU usage by directly inspecting the state of each GPU.
-    """
-    training_gpus_used = 0
-    inference_gpus_used = 0
-    borrowed_gpus_used = 0
+        """
+        Logs a snapshot of GPU usage by directly inspecting the state of each GPU.
+        """
+        training_gpus_used = 0
+        inference_gpus_used = 0
+        borrowed_gpus_used = 0
 
-    # 1. Count usage by iterating through the training GPUs
-    for gpu in self.cluster.training_gpus:
-        if not gpu.is_idle():
-            training_gpus_used += 1
+        # 1. Count usage by iterating through the training GPUs
+        for gpu in self.cluster.training_gpus:
+            if not gpu.is_idle():
+                training_gpus_used += 1
 
-    # 2. Count usage by iterating through the inference GPUs
-    for gpu in self.cluster.inference_gpus:
-        if not gpu.is_idle():
-            # If a GPU is busy, check the type of tasks on it
-            has_native_task = False  # Inference or LLM jobs
-            has_borrowed_task = False # Training jobs
+        # 2. Count usage by iterating through the inference GPUs
+        for gpu in self.cluster.inference_gpus:
+            if not gpu.is_idle():
+                # If a GPU is busy, check the type of tasks on it
+                has_native_task = False  # Inference or LLM jobs
+                has_borrowed_task = False # Training jobs
 
-            for task in gpu.running_tasks.values():
-                job_type = task['job'].job_type
-                if job_type == 'inference' or job_type == 'llm_inference' or gpu.is_llm_server:
-                    has_native_task = True
-                elif job_type == 'training':
-                    has_borrowed_task = True
-            
-            if has_native_task:
-                inference_gpus_used += 1
-            if has_borrowed_task:
-                borrowed_gpus_used += 1
-    
-    self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used}\n")
+                for task in gpu.running_tasks.values():
+                    job_type = task['job'].job_type
+                    if job_type == 'inference' or job_type == 'llm_inference' or gpu.is_llm_server:
+                        has_native_task = True
+                    elif job_type == 'training':
+                        has_borrowed_task = True
+                
+                if has_native_task:
+                    inference_gpus_used += 1
+                if has_borrowed_task:
+                    borrowed_gpus_used += 1
+        
+        self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used}\n")
 
         
     def _dispatch_job(self, job):
