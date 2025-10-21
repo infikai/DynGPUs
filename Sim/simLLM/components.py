@@ -68,13 +68,11 @@ class GPU:
         self.running_tasks[job.id] = {'job': job, 'mem': mem_slice, 'util': util_slice}
 
     def assign_llm_task(self, job):
-        # When a GPU becomes an LLM server, it dedicates all resources to it.
         if not self.is_llm_server:
             self.is_llm_server = True
             self.llm_slots_total = LLM_MAX_CONCURRENCY
             self.llm_slots_available = LLM_MAX_CONCURRENCY
             
-            # NEW: Block all memory and utilization
             self.available_memory = 0
             self.available_utilization = 0
 
@@ -82,23 +80,24 @@ class GPU:
             raise Exception(f"No LLM slots available on GPU {self.gpu_id}")
 
         self.llm_slots_available -= 1
-        self.running_tasks[job.id] = {'job': job, 'type': 'llm'}
+        
+        # CHANGED: Use the consistent job type name
+        self.running_tasks[job.id] = {'job': job, 'type': 'llm_inference'}
 
     def release_task(self, job):
         if job.id not in self.running_tasks: return
         
         task_info = self.running_tasks.pop(job.id)
         
-        if task_info.get('type') == 'llm':
+        # CHANGED: Use the consistent job type name
+        if task_info.get('type') == 'llm_inference':
             self.llm_slots_available += 1
             
-            # If this was the LAST LLM job, revert the server state
             if self.llm_slots_available == self.llm_slots_total:
                 self.is_llm_server = False
                 self.llm_slots_total = 0
                 self.llm_slots_available = 0
                 
-                # NEW: Restore all memory and utilization to their max values
                 self.available_memory = self.total_memory
                 self.available_utilization = self.total_utilization
         else: # Regular job
