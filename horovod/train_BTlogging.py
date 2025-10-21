@@ -47,7 +47,7 @@ parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
                     help='apply gradient predivide factor in optimizer (default: 1.0)')
 
 # Elastic Horovod settings
-parser.add_argument('--batches-per-commit', type=int, default=500,
+parser.add_argument('--batches-per-commit', type=int, default=700,
                     help='number of batches processed before calling `state.commit()`; '
                          'commits prevent losing progress if an error occurs, but slow '
                          'down training.')
@@ -259,7 +259,7 @@ def end_epoch(state):
     state.epoch += 1
     state.batch = 0
     state.train_sampler.set_epoch(state.epoch)
-    state.commit()
+    # state.commit()
 
 
 # Horovod: average metrics from distributed training.
