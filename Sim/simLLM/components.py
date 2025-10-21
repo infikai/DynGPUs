@@ -42,11 +42,9 @@ class GPU:
         # NEW: Add an attribute to store utilization before LLM jobs take over
         self.utilization_before_llm = None
 
+        self.is_llm_server = False
         self.llm_slots_total = 0
         self.llm_slots_available = 0
-        if self.gpu_type == 'inference':
-            self.llm_slots_total = LLM_MAX_CONCURRENCY
-            self.llm_slots_available = LLM_MAX_CONCURRENCY
         
         self.running_tasks = {}
 
@@ -70,13 +68,18 @@ class GPU:
         self.running_tasks[job.id] = {'job': job, 'mem': mem_slice, 'util': util_slice}
 
     def assign_llm_task(self, job):
+        # When a GPU becomes an LLM server, it dedicates all resources to it.
+        if not self.is_llm_server:
+            self.is_llm_server = True
+            self.llm_slots_total = LLM_MAX_CONCURRENCY
+            self.llm_slots_available = LLM_MAX_CONCURRENCY
+            
+            # NEW: Block all memory and utilization
+            self.available_memory = 0
+            self.available_utilization = 0
+
         if self.llm_slots_available <= 0:
             raise Exception(f"No LLM slots available on GPU {self.gpu_id}")
-
-        # NEW: If this is the FIRST LLM job on this GPU, save and block utilization
-        if self.llm_slots_available == self.llm_slots_total:
-            self.utilization_before_llm = self.available_utilization
-            self.available_utilization = 0
 
         self.llm_slots_available -= 1
         self.running_tasks[job.id] = {'job': job, 'type': 'llm'}
@@ -89,14 +92,19 @@ class GPU:
         if task_info.get('type') == 'llm':
             self.llm_slots_available += 1
             
-            # NEW: If this was the LAST LLM job, restore the original utilization
-            if self.llm_slots_available == self.llm_slots_total and self.utilization_before_llm is not None:
-                self.available_utilization = self.utilization_before_llm
-                self.utilization_before_llm = None
-        else:
+            # If this was the LAST LLM job, revert the server state
+            if self.llm_slots_available == self.llm_slots_total:
+                self.is_llm_server = False
+                self.llm_slots_total = 0
+                self.llm_slots_available = 0
+                
+                # NEW: Restore all memory and utilization to their max values
+                self.available_memory = self.total_memory
+                self.available_utilization = self.total_utilization
+        else: # Regular job
             self.available_memory += task_info['mem']
             self.available_utilization += task_info['util']
-
+    
     def is_idle(self):
         return not self.running_tasks
 
