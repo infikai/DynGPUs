@@ -90,7 +90,9 @@ class GPU:
         return [task['job'] for task in self.running_tasks.values() if task['job'].job_type == 'training']
 
 class Job:
-    def __init__(self, id, job_type, base_duration, arrival_time, memory_required, utilization_required):
+    def __init__(self, id, job_type, arrival_time, base_duration=0, 
+                 memory_required=0, utilization_required=0, 
+                 input_tokens=0, output_tokens=0):
         self.id = id
         self.job_type = job_type
         self.base_duration = base_duration
