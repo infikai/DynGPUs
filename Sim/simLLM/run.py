@@ -114,7 +114,7 @@ if __name__ == "__main__":
 
     print("🚀 Starting Simulation...")
     cluster = ClusterManager(num_training_gpus=1700, 
-                             num_inference_gpus=300)
+                             num_inference_gpus=20)
     
     job_workload = load_jobs_from_csv(args.csv_file)
     if args.llm_trace:
