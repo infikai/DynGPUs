@@ -14,9 +14,9 @@ LOW_UTIL_THRESHOLD = 50.0
 PARTIAL_LOCK_FRACTION = 0.1
 
 # NEW: LLM Inference Performance Model Constants
-LLM_TTFT = 0.5  # Time To First Token (seconds)
-LLM_TPOT = 0.05 # Time Per Output Token (seconds)
-LLM_MAX_CONCURRENCY = 17 # Max concurrent requests per GPU
+LLM_TTFT = 1.5  # Time To First Token (seconds)
+LLM_TPOT = 0.1 # Time Per Output Token (seconds)
+LLM_MAX_CONCURRENCY = 12 # Max concurrent requests per GPU
 
 class SimulationClock:
     """A simple discrete-time simulation clock."""
