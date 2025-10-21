@@ -5,6 +5,7 @@ import argparse
 from scheduler import Scheduler
 from cluster_manager import ClusterManager
 from components import Job
+import time
 
 def load_jobs_from_csv(file_path):
     """
@@ -112,6 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--tick-duration", type=int, default=1, help="The duration of each simulation time step (tick).")
     args = parser.parse_args()
 
+    simulation_start_time = time.time()
     print("🚀 Starting Simulation...")
     cluster = ClusterManager(num_training_gpus=700, 
                              num_inference_gpus=100)
@@ -121,11 +123,16 @@ if __name__ == "__main__":
         llm_job_workload = load_llm_jobs_from_csv(args.llm_trace)
         job_workload.extend(llm_job_workload)
     
+    read_job_time = time.time() - simulation_start_time
+    print(f"\n Read job runtime: {read_job_time/60:.2f} minutes")
+    
     # CRITICAL: Re-sort the combined list by arrival time
     job_workload.sort(key=lambda j: j.arrival_time)
+
+    sorting_time = time.time() - simulation_start_time - read_job_time
+    print(f"\n Sorting runtime: {sorting_time/60:.2f} minutes")
     
     if job_workload:
-        # ** MODIFIED: Pass tick_duration to the Scheduler **
         scheduler = Scheduler(job_workload, cluster, 
                               progress_interval=args.progress_interval,
                               log_interval=args.log_interval,
@@ -139,3 +146,8 @@ if __name__ == "__main__":
         scheduler.print_results()
     else:
         print("Simulation aborted due to missing workload.")
+
+    # <-- 3. Calculate and print the total elapsed time
+    simulation_end_time = time.time()
+    elapsed_time = simulation_end_time - simulation_start_time
+    print(f"\n⏱️ Total real-world runtime: {elapsed_time/60/60:.2f} hours")
