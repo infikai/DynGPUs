@@ -13,7 +13,7 @@ from sampler import MyElasticSampler
 import argparse
 
 # Hyperparameters
-EPOCHS = 100
+EPOCHS = 1
 
 class TrainingState:
     def __init__(self):
