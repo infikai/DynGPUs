@@ -54,8 +54,8 @@ class Scheduler:
                     # Count borrowed GPUs separately.
                     elif gpu.gpu_type == 'inference':
                         borrowed_gpus_used.add(gpu.gpu_id)
-                elif job.job_type == 'inference':
-                    # This correctly adds any inference GPU running an inference job.
+                elif job.job_type == 'inference' or job.job_type == 'llm_inference':
+                    # This adds any inference GPU running a regular or LLM inference job.
                     inference_gpus_used.add(gpu.gpu_id)
         
         self.usage_log_file.write(f"{self.clock.current_time},{len(training_gpus_used)},{len(inference_gpus_used)},{len(borrowed_gpus_used)}\n")
