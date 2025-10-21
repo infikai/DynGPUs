@@ -3,7 +3,7 @@
 # --- Global Constants ---
 GPU_MEMORY_GB = 32
 GPU_UTILIZATION_PERCENT = 100
-PREEMPTION_OVERHEAD = 3
+PREEMPTION_OVERHEAD = 2
 RECLAMATION_OVERHEAD = 6 # 30 for Horovod
 SHARABLE_GPU_MEM_PENALTY_GB = 1.5
 
@@ -14,9 +14,10 @@ LOW_UTIL_THRESHOLD = 50.0
 PARTIAL_LOCK_FRACTION = 0.1
 
 # NEW: LLM Inference Performance Model Constants
-LLM_TTFT = 2.5  # Time To First Token (seconds)
-LLM_TPOT = 0.15 # Time Per Output Token (seconds)
-LLM_MAX_CONCURRENCY = 8 # Max concurrent requests per GPU
+LLM_BASE_TTFT = 1.5          # Renamed: Base time to first token, independent of input
+LLM_TKN_PER_INPUT = 0.006    # New: Time (in seconds) to process each input token
+LLM_TPOT = 0.2               # Time Per Output Token (seconds)
+LLM_MAX_CONCURRENCY = 5      # Max concurrent requests per GPU
 
 class SimulationClock:
     """A simple discrete-time simulation clock."""
@@ -70,7 +71,7 @@ class GPU:
     def assign_llm_task(self, job):
         if not self.is_llm_server:
             self.is_llm_server = True
-            print("One GPU become LLM server")
+            # print("One GPU become LLM server")
             self.llm_slots_total = LLM_MAX_CONCURRENCY
             self.llm_slots_available = LLM_MAX_CONCURRENCY
             
@@ -126,7 +127,9 @@ class Job:
 
         # If it's an LLM job, calculate its duration now
         if self.job_type == 'llm_inference':
-            self.base_duration = LLM_TTFT + (LLM_TPOT * self.output_tokens)
+            time_to_process_input = LLM_TKN_PER_INPUT * self.input_tokens
+            time_to_generate_output = LLM_TPOT * self.output_tokens
+            self.base_duration = LLM_BASE_TTFT + time_to_process_input + time_to_generate_output
         
         self.remaining_work = base_duration
         self.assigned_gpus = []
