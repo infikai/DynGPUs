@@ -65,9 +65,9 @@ def load_llm_jobs_from_csv(file_path):
     jobs = []
     # Assumes columns are named: arrival_time, input_tokens, output_tokens
     df.rename(columns={
-        'TIMESTAMP_seconds': 'arrival_time', # Accommodate different column names
-        'ContextTokens': 'input_tokens',
-        'GeneratedTokens': 'output_tokens'
+        'start_time_t': 'TIMESTAMP_seconds', # Accommodate different column names
+        'in_tokens': 'ContextTokens',
+        'out_tokens': 'GeneratedTokens'
     }, inplace=True)
 
     for index, row in df.iterrows():
