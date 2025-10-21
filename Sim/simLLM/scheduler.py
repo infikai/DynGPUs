@@ -61,7 +61,7 @@ class Scheduler:
 
             for task in gpu.running_tasks.values():
                 job_type = task['job'].job_type
-                if job_type == 'inference' or job_type == 'llm_inference':
+                if job_type == 'inference' or job_type == 'llm_inference' or gpu.is_llm_server:
                     has_native_task = True
                 elif job_type == 'training':
                     has_borrowed_task = True
