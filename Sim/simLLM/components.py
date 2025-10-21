@@ -38,13 +38,17 @@ class GPU:
         self.total_utilization = GPU_UTILIZATION_PERCENT
         self.available_memory = self.total_memory
         self.available_utilization = self.total_utilization
-        self.running_tasks = {}
+        
+        # NEW: Add an attribute to store utilization before LLM jobs take over
+        self.utilization_before_llm = None
 
         self.llm_slots_total = 0
         self.llm_slots_available = 0
         if self.gpu_type == 'inference':
             self.llm_slots_total = LLM_MAX_CONCURRENCY
             self.llm_slots_available = LLM_MAX_CONCURRENCY
+        
+        self.running_tasks = {}
 
     def apply_memory_penalty(self, penalty_gb):
         self.total_memory -= penalty_gb
@@ -59,7 +63,7 @@ class GPU:
             print(f"\n‼️ WARNING: ASSIGNMENT FAILED ON GPU {self.gpu_id}")
             print(f"   GPU State : Available Mem={self.available_memory:.2f}, Available Util={self.available_utilization:.2f}")
             print(f"   Job Slice : Required Mem={mem_slice:.2f}, Required Util={util_slice:.2f}")
-            print(f"   Full Job  : {job!r}\n") # Using !r calls the __repr__ method
+            print(f"   Full Job  : {job!r}\n")
             raise Exception(f"Resource slice for job {job.id}: mem:{mem_slice}, util:{util_slice} cannot fit on GPU {self.gpu_id}: {self.available_memory}: {self.available_utilization}.")
         self.available_memory -= mem_slice
         self.available_utilization -= util_slice
@@ -68,21 +72,31 @@ class GPU:
     def assign_llm_task(self, job):
         if self.llm_slots_available <= 0:
             raise Exception(f"No LLM slots available on GPU {self.gpu_id}")
+
+        # NEW: If this is the FIRST LLM job on this GPU, save and block utilization
+        if self.llm_slots_available == self.llm_slots_total:
+            self.utilization_before_llm = self.available_utilization
+            self.available_utilization = 0
+
         self.llm_slots_available -= 1
-        # We still add it to running_tasks for general tracking
         self.running_tasks[job.id] = {'job': job, 'type': 'llm'}
-    
+
     def release_task(self, job):
         if job.id not in self.running_tasks: return
         
         task_info = self.running_tasks.pop(job.id)
         
-        # Check if it was an LLM or regular job to restore correct resources
         if task_info.get('type') == 'llm':
             self.llm_slots_available += 1
-        else: # It was a regular job
+            
+            # NEW: If this was the LAST LLM job, restore the original utilization
+            if self.llm_slots_available == self.llm_slots_total and self.utilization_before_llm is not None:
+                self.available_utilization = self.utilization_before_llm
+                self.utilization_before_llm = None
+        else:
             self.available_memory += task_info['mem']
             self.available_utilization += task_info['util']
+
     def is_idle(self):
         return not self.running_tasks
 
