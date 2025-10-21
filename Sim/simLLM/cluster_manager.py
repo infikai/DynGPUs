@@ -8,7 +8,7 @@ class ClusterManager:
         self.training_gpus = [GPU(f"T_{i}", 'training') for i in range(num_training_gpus)]
         self.inference_gpus = [GPU(f"I_{i}", 'inference') for i in range(num_inference_gpus)]
         
-        num_sharable = num_inference_gpus * 0.7
+        num_sharable = num_inference_gpus // 3 * 2
         for i in range(num_sharable):
             gpu = self.inference_gpus[i]
             gpu.is_reservable = True
