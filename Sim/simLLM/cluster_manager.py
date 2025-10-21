@@ -135,6 +135,7 @@ class ClusterManager:
             if gpu.sharable:
                 for job in gpu.get_running_training_jobs():
                     return (job, gpu)
+        print(f"DEBUG: No victim found.")
         return (None, None)
 
     def release_resources_for_job(self, job):
