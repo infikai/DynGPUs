@@ -53,22 +53,42 @@ def load_jobs_from_csv(file_path):
 
 def load_llm_jobs_from_csv(file_path):
     """
-    Loads LLM inference job definitions from a specified CSV file using a fast approach.
+    Loads LLM jobs from a large CSV file using a highly optimized approach.
     """
-    print(f"Optimized: Loading LLM jobs from {file_path}...")
+    print(f"Highly Optimized: Loading LLM jobs from {file_path}...")
     try:
-        df = pd.read_csv(file_path)
+        # Define the specific columns and their data types for efficiency.
+        # This tells pandas exactly what to do, saving time and memory.
+        job_spec = {
+            'TIMESTAMP_seconds': 'float64',
+            'ContextTokens': 'int32',
+            'GeneratedTokens': 'int32'
+        }
+
+        # Use the 'pyarrow' engine for a significant speedup on large files.
+        df = pd.read_csv(
+            file_path,
+            engine='pyarrow',
+            usecols=job_spec.keys(),
+            dtype=job_spec
+        )
+
     except FileNotFoundError:
         print(f"Warning: The file '{file_path}' was not found. No LLM jobs will be loaded.")
         return []
+    except Exception as e:
+        print(f"An error occurred while loading the CSV: {e}")
+        print("Please ensure 'pyarrow' is installed (`pip install pyarrow`) and the CSV format is correct.")
+        return []
 
+    # Rename columns for use in the simulator.
     df.rename(columns={
         'TIMESTAMP_seconds': 'arrival_time',
         'ContextTokens': 'input_tokens',
         'GeneratedTokens': 'output_tokens'
     }, inplace=True)
 
-    # Use a list comprehension with df.itertuples() for fast iteration
+    # The itertuples() loop is already fast; the main bottleneck was reading the file.
     jobs = [Job(id=f"llm_job_{row.Index}",
                 job_type='llm_inference',
                 arrival_time=row.arrival_time,
