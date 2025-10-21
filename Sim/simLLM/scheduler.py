@@ -244,7 +244,7 @@ class Scheduler:
             is_high_memory_job = mem_slice_per_gpu > effective_gpu_mem
 
             if not is_high_memory_job:
-                extra_gpus_to_request = math.floor(gpus_needed * 0.4)
+                extra_gpus_to_request = math.floor(gpus_needed * 0.5)
                 if extra_gpus_to_request > 0:
                     # The inference pool is now only used for these extra GPUs.
                     extra_gpus = self.cluster.find_idle_borrowable_gpus(extra_gpus_to_request)
