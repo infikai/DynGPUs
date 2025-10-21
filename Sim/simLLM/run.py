@@ -53,30 +53,29 @@ def load_jobs_from_csv(file_path):
 
 def load_llm_jobs_from_csv(file_path):
     """
-    Loads LLM inference job definitions from a specified CSV file.
+    Loads LLM inference job definitions from a specified CSV file using a fast approach.
     """
-    print(f"Loading LLM jobs from {file_path}...")
+    print(f"Optimized: Loading LLM jobs from {file_path}...")
     try:
         df = pd.read_csv(file_path)
     except FileNotFoundError:
         print(f"Warning: The file '{file_path}' was not found. No LLM jobs will be loaded.")
         return []
 
-    jobs = []
     df.rename(columns={
         'TIMESTAMP_seconds': 'arrival_time',
         'ContextTokens': 'input_tokens',
         'GeneratedTokens': 'output_tokens'
     }, inplace=True)
 
-    for index, row in df.iterrows():
-        job = Job(id=f"llm_job_{index}",
-                  job_type='llm_inference',
-                  arrival_time=row['arrival_time'],
-                  input_tokens=row['input_tokens'],
-                  output_tokens=row['output_tokens'])
-        jobs.append(job)
-        
+    # Use a list comprehension with df.itertuples() for fast iteration
+    jobs = [Job(id=f"llm_job_{row.Index}",
+                job_type='llm_inference',
+                arrival_time=row.arrival_time,
+                input_tokens=row.input_tokens,
+                output_tokens=row.output_tokens)
+            for row in df.itertuples()]
+
     print(f"➡️ Successfully loaded {len(jobs)} LLM inference jobs.")
     return jobs
 
