@@ -14,9 +14,9 @@ LOW_UTIL_THRESHOLD = 50.0
 PARTIAL_LOCK_FRACTION = 0.1
 
 # NEW: LLM Inference Performance Model Constants
-LLM_TTFT = 1.5  # Time To First Token (seconds)
-LLM_TPOT = 0.1 # Time Per Output Token (seconds)
-LLM_MAX_CONCURRENCY = 12 # Max concurrent requests per GPU
+LLM_TTFT = 2.5  # Time To First Token (seconds)
+LLM_TPOT = 0.15 # Time Per Output Token (seconds)
+LLM_MAX_CONCURRENCY = 8 # Max concurrent requests per GPU
 
 class SimulationClock:
     """A simple discrete-time simulation clock."""
@@ -70,6 +70,7 @@ class GPU:
     def assign_llm_task(self, job):
         if not self.is_llm_server:
             self.is_llm_server = True
+            print("One GPU become LLM server")
             self.llm_slots_total = LLM_MAX_CONCURRENCY
             self.llm_slots_available = LLM_MAX_CONCURRENCY
             
