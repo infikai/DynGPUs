@@ -132,7 +132,7 @@ class Scheduler:
         num_jobs = len(llm_jobs)
         
         # 1. Get all possible GPU slots from active servers, idle GPUs, or by preempting.
-        available_slots, victims_to_preempt = self.cluster.find_resources_for_llm_batch(num_jobs, self.clock.current_time)
+        available_slots, victims_to_preempt = self.cluster.find_resources_for_llm_batch(num_jobs)
         
         # 2. Perform all necessary preemptions found in the previous step.
         if victims_to_preempt:
