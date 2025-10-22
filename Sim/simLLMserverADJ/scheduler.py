@@ -209,6 +209,7 @@ class Scheduler:
                     break # Stop if we run out of jobs
                 
                 job = llm_jobs[job_index]
+                job.start_time = self.clock.current_time # Set start time
                 gpu.assign_llm_task(job) # This will convert the GPU if needed
                 self.running_jobs.append(job)
                 
