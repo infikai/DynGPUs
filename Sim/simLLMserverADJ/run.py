@@ -123,6 +123,23 @@ if __name__ == "__main__":
     cluster = ClusterManager(num_training_gpus=700, 
                              num_inference_gpus=100)
     
+    initial_servers_to_create = 5
+    print(f"Pre-warming {initial_servers_to_create} LLM servers...")
+
+    # Find all idle, non-LLM GPUs (which is all of them at the start)
+    candidates = [gpu for gpu in cluster.inference_gpus if gpu.is_idle() and not gpu.is_llm_server]
+    
+    # Sort them to prioritize non-sharable (False comes before True)
+    candidates.sort(key=lambda gpu: gpu.sharable)
+
+    # Convert the top candidates
+    servers_created = 0
+    for gpu in candidates[:initial_servers_to_create]:
+        gpu.convert_to_llm_server()
+        servers_created += 1
+
+    print(f"➡️ Successfully pre-warmed {servers_created} LLM servers.")
+    
     job_workload = load_jobs_from_csv(args.csv_file)
     if args.llm_trace:
         llm_job_workload = load_llm_jobs_from_csv(args.llm_trace)
