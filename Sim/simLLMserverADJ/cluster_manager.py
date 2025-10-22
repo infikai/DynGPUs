@@ -55,34 +55,27 @@ class ClusterManager:
     def find_resources_for_llm_batch(self, num_jobs_needed):
         """
         Finds available resources for an LLM batch with a multi-level priority.
-        This function NO LONGER preempts jobs.
+        This function now returns a simple list of usable GPUs.
         """
-        available_slots = []
+        available_gpus = [] # This will be a list of GPU objects, not slots
         
-        # --- Priority 1 & 2: Fill up existing LLM servers ---
+        # --- Priority 1 & 2: Get all existing LLM servers ---
         active_server_gpus = [gpu for gpu in self.inference_gpus if gpu.is_llm_server]
         active_server_gpus.sort(key=lambda gpu: (gpu.sharable, gpu.llm_slots_available))
         
-        for gpu in active_server_gpus:
-            for _ in range(gpu.llm_slots_available):
-                available_slots.append(gpu)
+        available_gpus.extend(active_server_gpus)
 
-        # --- Priority 3 & 4: Convert idle regular GPUs ---
+        # --- Priority 3 & 4: Get all convertible idle GPUs ---
         convertible_gpus = [gpu for gpu in self.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
         convertible_gpus.sort(key=lambda gpu: gpu.sharable)
 
-        for gpu in convertible_gpus:
-            # 1. Convert the GPU *immediately* to set its state.
-            was_converted = gpu.convert_to_llm_server()
-            
-            # 2. If conversion was successful, add its new slots to the list.
-            if was_converted:
-                for _ in range(gpu.llm_slots_available):
-                    available_slots.append(gpu)
+        # --- THIS IS THE FIX ---
+        # Just add the GPU *once*. The scheduler will handle filling it.
+        available_gpus.extend(convertible_gpus)
+        # --- END FIX ---
 
-        # --- Preemption section is removed ---
-        # This function only returns available slots.
-        return available_slots, []
+        # Return the list of GPUs. The adaptive policy will handle preemption.
+        return available_gpus, []
     
     def find_gpu_for_llm_job(self):
         """
