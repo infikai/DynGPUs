@@ -179,6 +179,7 @@ class Scheduler:
     def _batch_dispatch_llm_jobs(self, llm_jobs):
         """
         Dispatches a batch of LLM jobs by intelligently filling available GPUs.
+        This function now explicitly handles GPU conversion.
         """
         if not llm_jobs:
             return []
@@ -195,13 +196,22 @@ class Scheduler:
             if job_index >= num_jobs_to_assign:
                 break # All jobs have been assigned
 
-            # Find out how many slots this GPU *really* has
             slots_to_fill = 0
-            if gpu.is_llm_server:
-                slots_to_fill = gpu.llm_slots_available
+            
+            # --- THIS IS THE FIX ---
+            # Explicitly check if the GPU needs conversion
+            if not gpu.is_llm_server:
+                # This is an idle GPU. Convert it now.
+                was_converted = gpu.convert_to_llm_server()
+                if not was_converted:
+                    continue # Conversion failed (maybe not idle?), skip this GPU
+                
+                # Now that it's converted, get its slots
+                slots_to_fill = gpu.llm_slots_available # This is now LLM_MAX_CONCURRENCY
             else:
-                # This is an idle GPU, so it will get max slots upon conversion
-                slots_to_fill = LLM_MAX_CONCURRENCY
+                # This is an existing server. Get its remaining slots.
+                slots_to_fill = gpu.llm_slots_available
+            # --- END FIX ---
                 
             # Fill this one GPU with as many jobs as it can take
             for _ in range(slots_to_fill):
@@ -210,7 +220,7 @@ class Scheduler:
                 
                 job = llm_jobs[job_index]
                 job.start_time = self.clock.current_time # Set start time
-                gpu.assign_llm_task(job) # This will convert the GPU if needed
+                gpu.assign_llm_task(job) # This now only assigns the task
                 self.running_jobs.append(job)
                 
                 assigned_count += 1
