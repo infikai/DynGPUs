@@ -72,8 +72,13 @@ class ClusterManager:
         convertible_gpus.sort(key=lambda gpu: gpu.sharable)
 
         for gpu in convertible_gpus:
-            for _ in range(LLM_MAX_CONCURRENCY):
-                available_slots.append(gpu)
+            # 1. Convert the GPU *immediately* to set its state.
+            was_converted = gpu.convert_to_llm_server()
+            
+            # 2. If conversion was successful, add its new slots to the list.
+            if was_converted:
+                for _ in range(gpu.llm_slots_available):
+                    available_slots.append(gpu)
 
         # --- Preemption section is removed ---
         # This function only returns available slots.
