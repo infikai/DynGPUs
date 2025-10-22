@@ -427,6 +427,20 @@ class Scheduler:
                 if self.clock.current_time % self.log_interval == 0:
                     self._log_gpu_usage()
             
+            if self.clock.current_time % self.progress_interval == 0 and (self.running_jobs or self.pending_jobs or self.jobs_to_retry):
+                
+                # --- NEW: Calculate real-time LLM stats ---
+                num_llm_servers = sum(1 for gpu in self.cluster.inference_gpus if gpu.is_llm_server)
+                num_llm_jobs = sum(1 for job in self.running_jobs if job.job_type == 'llm_inference')
+                
+                # --- UPDATED: Print statement with new stats ---
+                print(f"🕒 Clock {self.clock.current_time}: "
+                      f"Pending={len(self.pending_jobs)}, "
+                      f"Retrying={len(self.jobs_to_retry)}, "
+                      f"Running={len(self.running_jobs)} (LLM: {num_llm_jobs}), "
+                      f"LLM Servers={num_llm_servers}, "
+                      f"Completed={len(self.completed_jobs)}")
+            
             # --- Fairer Dispatch Logic (prevents Head-of-Line Blocking) ---
             # 1. Combine jobs to be attempted this tick, prioritizing retries.
             arrived_jobs = list(self.jobs_to_retry)
@@ -463,20 +477,6 @@ class Scheduler:
             for job in finished_this_tick:
                 self._handle_job_completion(job)
 
-            # --- Progress Reporting ---
-            if self.clock.current_time % self.progress_interval == 0 and (self.running_jobs or self.pending_jobs or self.jobs_to_retry):
-                
-                # --- NEW: Calculate real-time LLM stats ---
-                num_llm_servers = sum(1 for gpu in self.cluster.inference_gpus if gpu.is_llm_server)
-                num_llm_jobs = sum(1 for job in self.running_jobs if job.job_type == 'llm_inference')
-                
-                # --- UPDATED: Print statement with new stats ---
-                print(f"🕒 Clock {self.clock.current_time}: "
-                      f"Pending={len(self.pending_jobs)}, "
-                      f"Retrying={len(self.jobs_to_retry)}, "
-                      f"Running={len(self.running_jobs)} (LLM: {num_llm_jobs}), "
-                      f"LLM Servers={num_llm_servers}, "
-                      f"Completed={len(self.completed_jobs)}")
 
     def print_results(self):
         """Prints a final summary and saves it to simulation_summary.txt."""
