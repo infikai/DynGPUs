@@ -19,7 +19,7 @@ PARTIAL_LOCK_FRACTION = 0.1
 LLM_BASE_TTFT = 2.5          # Renamed: Base time to first token, independent of input
 LLM_TKN_PER_INPUT = 0.005    # New: Time (in seconds) to process each input token
 LLM_TPOT = 0.2               # Time Per Output Token (seconds)
-LLM_MAX_CONCURRENCY = 5      # Max concurrent requests per GPU
+LLM_MAX_CONCURRENCY = 15      # Max concurrent requests per GPU
 
 class SimulationClock:
     """A simple discrete-time simulation clock."""
