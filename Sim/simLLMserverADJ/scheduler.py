@@ -89,8 +89,11 @@ class Scheduler:
     def _apply_adaptive_llm_policy(self):
         """
         Periodically adjusts the number of LLM servers based on the CURRENT
-        load, preempting training jobs if necessary to scale up.
+        load, preempting training jobs if necessary and handling reclamation
+        when scaling down.
         """
+        
+        print(f"--- ⚙️ Clock {self.clock.current_time}: Running adaptive LLM policy ---")
         
         # 1. Measure current LLM job load (running + waiting to be retried)
         llm_jobs_count = 0
@@ -104,6 +107,9 @@ class Scheduler:
                 
         # 2. Calculate the target number of LLM servers needed
         target_llm_gpus = math.ceil(llm_jobs_count / LLM_MAX_CONCURRENCY) + 1
+
+        # --- ADD THIS LINE FOR DEBUGGING ---
+        print(f"    Policy Check: Found {llm_jobs_count} active LLM jobs. Target servers: {target_llm_gpus}")
 
         # 3. Get the current state of the cluster
         current_llm_gpus = [gpu for gpu in self.cluster.inference_gpus if gpu.is_llm_server]
@@ -128,23 +134,18 @@ class Scheduler:
             gpus_still_needed = gpus_to_change - num_converted
             if gpus_still_needed > 0:
                 for _ in range(gpus_still_needed):
-                    # Find the best victim (least recently preempted, not in cooldown)
                     victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
                     
                     if victim_job and victim_gpu:
-                        # Preempt the job (this makes the GPU idle)
                         victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
                         self.preemption_map[victim_gpu.gpu_id] = victim_job
                         self.preemption_count += 1
-                        
-                        # Convert the newly idle GPU to an LLM server
                         victim_gpu.convert_to_llm_server()
                     else:
-                        # No more preemptible victims found, so we must stop.
                         break 
 
         elif gpus_to_change < 0: # --- Scale DOWN ---
-            # Find idle LLM servers to revert (prioritizing sharable ones)
+            
             candidates = [gpu for gpu in current_llm_gpus if not gpu.running_tasks]
             candidates.sort(key=lambda gpu: (not gpu.sharable, -gpu.llm_slots_available))
 
@@ -153,24 +154,15 @@ class Scheduler:
             for i in range(num_to_revert):
                 gpu_to_revert = candidates[i]
                 
-                # --- NEW RECLAMATION LOGIC ---
-                # Check if a training job is waiting to reclaim this GPU
                 if gpu_to_revert.gpu_id in self.preemption_map:
-                    reclaiming_job = self.preemption_map.pop(gpu_to_revert.gpu_id) # Remove from map
-                    
-                    # Revert the GPU state *first*
+                    reclaiming_job = self.preemption_map.pop(gpu_to_revert.gpu_id)
                     reverted = gpu_to_revert.revert_from_llm_server()
-                    
                     if reverted and reclaiming_job in self.running_jobs:
-                        # If job is still running, give the GPU back
                         reclaiming_job.reclaim_gpu(gpu_to_revert, self.clock.current_time)
                         self.reclamation_count += 1
-                        print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu_to_revert.gpu_id} via policy for job {reclaiming_job.id}.")
                     elif not reverted:
-                        # Reversion failed (shouldn't happen), put job back in map
                         self.preemption_map[gpu_to_revert.gpu_id] = reclaiming_job
                 else:
-                    # No job is waiting, just revert it to a normal idle GPU
                     gpu_to_revert.revert_from_llm_server()
     
     def _dispatch_job(self, job):
