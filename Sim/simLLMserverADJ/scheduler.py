@@ -48,29 +48,41 @@ class Scheduler:
         inference_gpus_used = 0
         borrowed_gpus_used = 0
 
-        # 1. Count usage by iterating through the training GPUs
+        # 1. Count usage in the dedicated training pool
         for gpu in self.cluster.training_gpus:
             if not gpu.is_idle():
                 training_gpus_used += 1
 
-        # 2. Count usage by iterating through the inference GPUs
+        # 2. Count usage in the inference pool with the new logic
         for gpu in self.cluster.inference_gpus:
-            if not gpu.is_idle():
-                # If a GPU is busy, check the type of tasks on it
-                has_native_task = False  # Inference or LLM jobs
-                has_borrowed_task = False # Training jobs
+            
+            # --- MODIFIED LOGIC ---
+            
+            # First, check if it's an LLM server. If so, it's *always*
+            # counted as an "inference GPU used", even if it's empty.
+            if gpu.is_llm_server:
+                inference_gpus_used += 1
+                
+            # If it's NOT an LLM server, then check if it's busy
+            # with other types of jobs (regular inference or borrowed training).
+            elif not gpu.is_idle():
+                has_native_task = False
+                has_borrowed_task = False
 
                 for task in gpu.running_tasks.values():
                     job_type = task['job'].job_type
-                    if job_type == 'inference' or job_type == 'llm_inference' or gpu.is_llm_server:
+                    
+                    if job_type == 'inference': # No 'llm_inference' needed here
                         has_native_task = True
                     elif job_type == 'training':
                         has_borrowed_task = True
-                
+
                 if has_native_task:
                     inference_gpus_used += 1
                 if has_borrowed_task:
                     borrowed_gpus_used += 1
+            
+            # --- END MODIFIED LOGIC ---
         
         self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used}\n")
 
