@@ -115,7 +115,11 @@ class GPU:
             self.available_utilization += task_info['util']
     
     def is_idle(self):
-        return not self.running_tasks
+        """
+        A GPU is only truly idle if it has no tasks AND it is not currently
+        configured as an exclusive-use LLM server.
+        """
+        return not self.running_tasks and not self.is_llm_server
 
     def get_running_training_jobs(self):
         return [task['job'] for task in self.running_tasks.values() if task['job'].job_type == 'training']
