@@ -4,7 +4,8 @@ import math
 from collections import deque
 from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATION_PERCENT, 
                         PREEMPTION_OVERHEAD, RECLAMATION_OVERHEAD, HIGH_UTIL_THRESHOLD, 
-                        LOW_UTIL_THRESHOLD, PARTIAL_LOCK_FRACTION, SHARABLE_GPU_MEM_PENALTY_GB)
+                        LOW_UTIL_THRESHOLD, PARTIAL_LOCK_FRACTION, SHARABLE_GPU_MEM_PENALTY_GB, 
+                        LLM_POLICY_INTERVAL)
 
 class Scheduler:
     """
