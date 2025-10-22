@@ -145,7 +145,7 @@ class Scheduler:
 
         elif gpus_to_change < 0: # --- Scale DOWN ---
             # Find idle LLM servers to revert (prioritizing sharable ones)
-            candidates = [gpu for gpu in current_llm_gpus if not gpu.running_tasks] # Find empty LLM servers
+            candidates = [gpu for gpu in current_llm_gpus if not gpu.running_tasks]
             candidates.sort(key=lambda gpu: (not gpu.sharable, -gpu.llm_slots_available))
 
             num_to_revert = min(abs(gpus_to_change), len(candidates))
