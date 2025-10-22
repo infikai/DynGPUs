@@ -6,6 +6,7 @@ GPU_UTILIZATION_PERCENT = 100
 PREEMPTION_OVERHEAD = 3
 RECLAMATION_OVERHEAD = 6
 PREEMPTION_COOLDOWN = 10
+LLM_POLICY_INTERVAL = 20
 SHARABLE_GPU_MEM_PENALTY_GB = 1.5
 
 # --- Policy Constants ---
@@ -69,40 +70,46 @@ class GPU:
         self.available_utilization -= util_slice
         self.running_tasks[job.id] = {'job': job, 'mem': mem_slice, 'util': util_slice}
 
-    def assign_llm_task(self, job):
-        if not self.is_llm_server:
-            self.is_llm_server = True
-            # print("One GPU become LLM server")
-            self.llm_slots_total = LLM_MAX_CONCURRENCY
-            self.llm_slots_available = LLM_MAX_CONCURRENCY
-            
-            self.available_memory = 0
-            self.available_utilization = 0
-
-        if self.llm_slots_available <= 0:
-            raise Exception(f"No LLM slots available on GPU {self.gpu_id}")
-
-        self.llm_slots_available -= 1
+    def convert_to_llm_server(self):
+        if self.is_llm_server or not self.is_idle():
+            # Can only convert an idle, non-LLM GPU
+            return False
         
-        # CHANGED: Use the consistent job type name
+        self.is_llm_server = True
+        self.llm_slots_total = LLM_MAX_CONCURRENCY
+        self.llm_slots_available = LLM_MAX_CONCURRENCY
+        
+        self.available_memory = 0
+        self.available_utilization = 0
+        return True
+
+    # NEW: Dedicated method to revert an LLM server to a regular GPU
+    def revert_from_llm_server(self):
+        if not self.is_llm_server or not self.is_idle():
+            # Can only revert an idle LLM GPU
+            return False
+        
+        self.is_llm_server = False
+        self.llm_slots_total = 0
+        self.llm_slots_available = 0
+        
+        self.available_memory = self.total_memory
+        self.available_utilization = self.total_utilization
+        return True
+
+    # SIMPLIFIED: This method no longer handles conversion
+    def assign_llm_task(self, job):
+        if not self.is_llm_server or self.llm_slots_available <= 0:
+            raise Exception(f"Attempted to assign LLM job to non-server or full GPU {self.gpu_id}")
+        self.llm_slots_available -= 1
         self.running_tasks[job.id] = {'job': job, 'type': 'llm_inference'}
 
+    # SIMPLIFIED: This method no longer handles reversion
     def release_task(self, job):
         if job.id not in self.running_tasks: return
-        
         task_info = self.running_tasks.pop(job.id)
-        
-        # CHANGED: Use the consistent job type name
         if task_info.get('type') == 'llm_inference':
             self.llm_slots_available += 1
-            
-            if self.llm_slots_available == self.llm_slots_total:
-                self.is_llm_server = False
-                self.llm_slots_total = 0
-                self.llm_slots_available = 0
-                
-                self.available_memory = self.total_memory
-                self.available_utilization = self.total_utilization
         else: # Regular job
             self.available_memory += task_info['mem']
             self.available_utilization += task_info['util']

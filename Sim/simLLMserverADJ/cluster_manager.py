@@ -52,59 +52,25 @@ class ClusterManager:
                     return gpu
         return None
 
-    def find_resources_for_llm_batch(self, num_jobs_needed, current_time):
-        """
-        Finds available resources for an LLM batch with a multi-level priority.
-        """
-        available_slots = []
-        
-        # --- Priority 1 & 2: Fill up existing LLM servers ---
-        active_server_gpus = [gpu for gpu in self.inference_gpus if gpu.is_llm_server]
-        
-        # NEW: Multi-level sort.
-        # Python's sort is stable. Sorting by a tuple applies criteria in order.
-        # 1. Primary sort: gpu.sharable (False comes before True, so non-sharable are first).
-        # 2. Secondary sort: gpu.llm_slots_available (busier servers come first).
-        active_server_gpus.sort(key=lambda gpu: (gpu.sharable, gpu.llm_slots_available))
-        
-        for gpu in active_server_gpus:
-            for _ in range(gpu.llm_slots_available):
-                available_slots.append(gpu)
+    def find_resources_for_llm_batch(self, num_jobs_needed):
+    """
+    Finds available slots for an LLM batch ONLY from the existing pool of
+    active LLM servers, with a multi-level priority.
+    """
+    available_slots = []
+    
+    # Find all GPUs currently designated as LLM servers
+    active_server_gpus = [gpu for gpu in self.inference_gpus if gpu.is_llm_server]
+    
+    # Sort them to prioritize filling non-sharable and busier servers first
+    active_server_gpus.sort(key=lambda gpu: (gpu.sharable, gpu.llm_slots_available))
+    
+    for gpu in active_server_gpus:
+        for _ in range(gpu.llm_slots_available):
+            available_slots.append(gpu)
 
-        # --- Priority 3 & 4: Convert idle regular GPUs ---
-        convertible_gpus = [gpu for gpu in self.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
-        
-        # This sort prioritizes non-sharable GPUs for conversion
-        convertible_gpus.sort(key=lambda gpu: gpu.sharable)
-
-        for gpu in convertible_gpus:
-            for _ in range(LLM_MAX_CONCURRENCY):
-                available_slots.append(gpu)
-
-        # --- Early exit if we have enough slots ---
-        if num_jobs_needed <= len(available_slots):
-            return available_slots, []
-
-        # --- Priority 5: Preempt training jobs as a last resort ---
-        jobs_still_unassigned = num_jobs_needed - len(available_slots)
-        
-        potential_victims = []
-        active_or_convertible_ids = {gpu.gpu_id for gpu in active_server_gpus} | {gpu.gpu_id for gpu in convertible_gpus}
-        for gpu in self.inference_gpus:
-            if gpu.gpu_id not in active_or_convertible_ids and gpu.sharable:
-                for job in gpu.get_running_training_jobs():
-                    # NEW: Only consider this job a victim if it's not in its cooldown period.
-                    if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN:
-                        potential_victims.append((job, gpu))
-
-        num_to_preempt = min(len(potential_victims), jobs_still_unassigned)
-        victims_to_preempt = potential_victims[:num_to_preempt]
-        
-        for victim_job, victim_gpu in victims_to_preempt:
-            for _ in range(LLM_MAX_CONCURRENCY):
-                available_slots.append(victim_gpu)
-
-        return available_slots, victims_to_preempt
+    # This function no longer handles preemption; it only returns available slots.
+    return available_slots, []
     
     def find_gpu_for_llm_job(self):
         """

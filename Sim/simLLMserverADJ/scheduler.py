@@ -73,7 +73,45 @@ class Scheduler:
         
         self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used}\n")
 
+    def _apply_adaptive_llm_policy(self):
+        """Periodically adjusts the number of LLM servers based on load."""
         
+        # 1. Measure current LLM job load (running + pending)
+        llm_jobs_count = 0
+        for job in self.running_jobs:
+            if job.job_type == 'llm_inference':
+                llm_jobs_count += 1
+                
+        for job in self.jobs_to_retry:
+            if job.job_type == 'llm_inference':
+                llm_jobs_count += 1
+
+        # 2. Calculate the target number of LLM servers needed
+        target_llm_gpus = math.ceil(llm_jobs_count / LLM_MAX_CONCURRENCY)
+
+        # 3. Get the current state of the cluster
+        current_llm_gpus = [gpu for gpu in self.cluster.inference_gpus if gpu.is_llm_server]
+        
+        # 4. Scale up or down to meet the target
+        gpus_to_change = target_llm_gpus - len(current_llm_gpus)
+
+        if gpus_to_change > 0: # Scale UP
+            # Find idle regular GPUs to convert, prioritizing non-sharable ones
+            candidates = [gpu for gpu in self.cluster.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
+            candidates.sort(key=lambda gpu: gpu.sharable)
+            
+            for i in range(min(gpus_to_change, len(candidates))):
+                candidates[i].convert_to_llm_server()
+
+        elif gpus_to_change < 0: # Scale DOWN
+            # Find idle LLM servers to revert, prioritizing sharable and least-busy ones
+            candidates = [gpu for gpu in current_llm_gpus if gpu.is_idle()]
+            # Sort by sharable (True > False) and slots (more > less) to revert sharable/empty ones first
+            candidates.sort(key=lambda gpu: (not gpu.sharable, -gpu.llm_slots_available))
+
+            for i in range(min(abs(gpus_to_change), len(candidates))):
+                candidates[i].revert_from_llm_server()
+    
     def _dispatch_job(self, job):
         """Routes a job to the appropriate dispatch method based on its type."""
         if job.job_type == 'training':
@@ -286,21 +324,18 @@ class Scheduler:
                         del self.preemption_map[gpu.gpu_id]
     
     def run_simulation(self):
-        """Main simulation loop with smart start time logic."""
+        """Main simulation loop with adaptive policies and fair dispatching."""
         if not self.pending_jobs: 
             print("No jobs to simulate.")
             self.print_results()
             return
 
-        # ** NEW: Determine the effective start time **
+        # --- Initialization and Filtering ---
         effective_start_time = self.start_time
         if self.start_time == 0:
-            # If default start time is used, fast-forward to the first job's arrival
             effective_start_time = self.pending_jobs[0].arrival_time
             print(f"No specific start time given. Fast-forwarding to first job arrival at time {effective_start_time}.")
 
-        # Filter jobs that arrive before the effective start time
-        # ** CORRECTED: Ensure the result of the filter is converted back to a deque **
         original_job_count = len(self.pending_jobs)
         filtered_list = [j for j in self.pending_jobs if j.arrival_time >= effective_start_time]
         self.pending_jobs = deque(filtered_list)
@@ -311,37 +346,35 @@ class Scheduler:
             self.print_results()
             return
 
-        # Set the clock's initial time
         self.clock.current_time = effective_start_time
+        self.jobs_to_retry = deque() # Initialize the retry queue
 
-        while self.pending_jobs or self.running_jobs:
+        # --- Main Simulation Loop ---
+        while self.pending_jobs or self.running_jobs or self.jobs_to_retry:
             if self.end_time != -1 and self.clock.current_time >= self.end_time:
                 print(f"\n🛑 Simulation ended at specified end time: {self.end_time}")
                 break
             
             self.clock.tick()
 
+            # --- Periodic Policy and Logging Calls (at the start of the tick) ---
             if self.clock.current_time > 0:
+                # Call the adaptive LLM policy function periodically
+                if self.clock.current_time % LLM_POLICY_INTERVAL == 0:
+                    self._apply_adaptive_llm_policy()
+                # Log GPU usage
                 if self.clock.current_time % self.log_interval == 0:
                     self._log_gpu_usage()
             
-            # # ** MODIFIED: New, highly efficient loop for dispatching arrived jobs **
-            # # It only checks the front of the queue, since it's sorted.
-            # while self.pending_jobs and self.pending_jobs[0].arrival_time <= self.clock.current_time:
-            #     job_to_dispatch = self.pending_jobs.popleft() # O(1) operation
-            #     if not self._dispatch_job(job_to_dispatch):
-            #         # If dispatch fails (e.g., cluster is full), put the job back at the front
-            #         # and stop trying to dispatch jobs for this time tick.
-            #         self.pending_jobs.appendleft(job_to_dispatch)
-            #         break
-
-            # ** MODIFIED: New dispatch loop to prevent head-of-line blocking **
-            arrived_jobs = []
+            # --- Fairer Dispatch Logic (prevents Head-of-Line Blocking) ---
+            # 1. Combine jobs to be attempted this tick, prioritizing retries.
+            arrived_jobs = list(self.jobs_to_retry)
+            self.jobs_to_retry.clear()
             while self.pending_jobs and self.pending_jobs[0].arrival_time <= self.clock.current_time:
                 arrived_jobs.append(self.pending_jobs.popleft())
 
             if arrived_jobs:
-                # 2. Separate LLM jobs from all other types
+                # 2. Separate LLM jobs for batch processing
                 arrived_llm_jobs = [j for j in arrived_jobs if j.job_type == 'llm_inference']
                 other_arrived_jobs = [j for j in arrived_jobs if j.job_type != 'llm_inference']
                 
@@ -354,23 +387,24 @@ class Scheduler:
                     if not self._dispatch_job(job):
                         unassigned_other_jobs.append(job)
 
-                # 5. Add any jobs that couldn't be scheduled back to the front of the queue
-                all_unassigned = sorted(unassigned_llm_jobs + unassigned_other_jobs, key=lambda j: j.arrival_time, reverse=True)
-                if all_unassigned:
-                    for job in all_unassigned:
-                        self.pending_jobs.appendleft(job)
-
+                # 5. Add all unassigned jobs to the retry queue for the next tick.
+                all_unassigned = sorted(unassigned_llm_jobs + unassigned_other_jobs, key=lambda j: j.arrival_time)
+                self.jobs_to_retry.extend(all_unassigned)
+            
+            # --- Job Progress and Completion Handling ---
             finished_this_tick = []
             for job in self.running_jobs:
                 job.update_progress(self.clock.tick_duration, self.clock.current_time)
                 if job.is_complete():
                     finished_this_tick.append(job)
             
+            # Handle completions last, removing jobs from the running list.
             for job in finished_this_tick:
                 self._handle_job_completion(job)
 
-            if self.clock.current_time % self.progress_interval == 0 and (self.running_jobs or self.pending_jobs):
-                print(f"🕒 Clock {self.clock.current_time}: Pending={len(self.pending_jobs)}, Running={len(self.running_jobs)}, Completed={len(self.completed_jobs)}")
+            # --- Progress Reporting ---
+            if self.clock.current_time % self.progress_interval == 0 and (self.running_jobs or self.pending_jobs or self.jobs_to_retry):
+                print(f"🕒 Clock {self.clock.current_time}: Pending={len(self.pending_jobs)}, Retrying={len(self.jobs_to_retry)}, Running={len(self.running_jobs)}, Completed={len(self.completed_jobs)}")
 
     def print_results(self):
         """Prints a final summary and saves it to simulation_summary.txt."""
