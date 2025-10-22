@@ -177,40 +177,45 @@ class Scheduler:
         return False
     
     def _batch_dispatch_llm_jobs(self, llm_jobs):
-        """Dispatches a batch of LLM jobs efficiently."""
+        """
+        Dispatches a batch of LLM jobs by intelligently filling available GPUs.
+        """
         if not llm_jobs:
             return []
 
-        num_jobs = len(llm_jobs)
+        num_jobs_to_assign = len(llm_jobs)
+        # Get the list of *GPUs* we can use, sorted by priority
+        available_gpus, _ = self.cluster.find_resources_for_llm_batch(num_jobs_to_assign)
         
-        # 1. Get all possible GPU slots from active servers, idle GPUs, or by preempting.
-        available_slots, victims_to_preempt = self.cluster.find_resources_for_llm_batch(num_jobs)
-        
-        # 2. Perform all necessary preemptions found in the previous step.
-        # if victims_to_preempt:
-        #     gpus_preempted = set()
-        #     for victim_job, victim_gpu in victims_to_preempt:
-        #         if victim_gpu.gpu_id not in gpus_preempted:
-        #             victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
-        #             self.preemption_map[victim_gpu.gpu_id] = victim_job
-        #             self.preemption_count += 1
-        #             gpus_preempted.add(victim_gpu.gpu_id)
-
-        # 3. Assign jobs to the pool of available slots.
         assigned_count = 0
-        for i, job in enumerate(llm_jobs):
-            if i < len(available_slots):
-                gpu = available_slots[i]
-                job.assigned_gpus = [gpu]
-                job.start_time = self.clock.current_time
-                gpu.assign_llm_task(job)
-                self.running_jobs.append(job)
-                assigned_count += 1
+        job_index = 0
+        
+        # Iterate through the available GPUs one by one
+        for gpu in available_gpus:
+            if job_index >= num_jobs_to_assign:
+                break # All jobs have been assigned
+
+            # Find out how many slots this GPU *really* has
+            slots_to_fill = 0
+            if gpu.is_llm_server:
+                slots_to_fill = gpu.llm_slots_available
             else:
-                # Stop if we run out of slots.
-                break 
-    
-        # 4. Return any jobs that couldn't be scheduled.
+                # This is an idle GPU, so it will get max slots upon conversion
+                slots_to_fill = LLM_MAX_CONCURRENCY
+                
+            # Fill this one GPU with as many jobs as it can take
+            for _ in range(slots_to_fill):
+                if job_index >= num_jobs_to_assign:
+                    break # Stop if we run out of jobs
+                
+                job = llm_jobs[job_index]
+                gpu.assign_llm_task(job) # This will convert the GPU if needed
+                self.running_jobs.append(job)
+                
+                assigned_count += 1
+                job_index += 1 # Move to the next job
+
+        # Return any jobs that are left over
         unassigned_jobs = llm_jobs[assigned_count:]
         return unassigned_jobs
 
@@ -432,6 +437,11 @@ class Scheduler:
                       f"Running={len(self.running_jobs)} (LLM: {num_llm_jobs}), "
                       f"LLM Servers={num_llm_servers}, "
                       f"Completed={len(self.completed_jobs)}")
+                
+                if len(self.running_jobs) > 0 and num_llm_jobs == 0:
+                        print("    [DEBUG] No LLM jobs found. Running jobs have types:")
+                        for job in self.running_jobs:
+                            print(f"    - Job {job.id}, Type: '{job.job_type}'")
             
             # --- Fairer Dispatch Logic (prevents Head-of-Line Blocking) ---
             # 1. Combine jobs to be attempted this tick, prioritizing retries.
