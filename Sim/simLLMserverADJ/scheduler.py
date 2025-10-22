@@ -465,7 +465,18 @@ class Scheduler:
 
             # --- Progress Reporting ---
             if self.clock.current_time % self.progress_interval == 0 and (self.running_jobs or self.pending_jobs or self.jobs_to_retry):
-                print(f"🕒 Clock {self.clock.current_time}: Pending={len(self.pending_jobs)}, Retrying={len(self.jobs_to_retry)}, Running={len(self.running_jobs)}, Completed={len(self.completed_jobs)}")
+                
+                # --- NEW: Calculate real-time LLM stats ---
+                num_llm_servers = sum(1 for gpu in self.cluster.inference_gpus if gpu.is_llm_server)
+                num_llm_jobs = sum(1 for job in self.running_jobs if job.job_type == 'llm_inference')
+                
+                # --- UPDATED: Print statement with new stats ---
+                print(f"🕒 Clock {self.clock.current_time}: "
+                      f"Pending={len(self.pending_jobs)}, "
+                      f"Retrying={len(self.jobs_to_retry)}, "
+                      f"Running={len(self.running_jobs)} (LLM: {num_llm_jobs}), "
+                      f"LLM Servers={num_llm_servers}, "
+                      f"Completed={len(self.completed_jobs)}")
 
     def print_results(self):
         """Prints a final summary and saves it to simulation_summary.txt."""
