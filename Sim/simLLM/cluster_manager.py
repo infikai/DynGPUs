@@ -1,6 +1,6 @@
 # file: cluster_manager.py
 
-from components import GPU, SHARABLE_GPU_MEM_PENALTY_GB, LLM_MAX_CONCURRENCY
+from components import GPU, SHARABLE_GPU_MEM_PENALTY_GB, LLM_MAX_CONCURRENCY, PREEMPTION_COOLDOWN
 
 class ClusterManager:
     """Manages GPU pools and dynamic partial locking of sharable GPUs."""
