@@ -93,7 +93,7 @@ class Scheduler:
         num_jobs = len(llm_jobs)
         
         # 1. Get all possible GPU slots from active servers, idle GPUs, or by preempting.
-        available_slots, victims_to_preempt = self.cluster.find_resources_for_llm_batch(num_jobs)
+        available_slots, victims_to_preempt = self.cluster.find_resources_for_llm_batch(num_jobs, self.clock.current_time)
         
         # 2. Perform all necessary preemptions found in the previous step.
         if victims_to_preempt:
@@ -134,7 +134,7 @@ class Scheduler:
         
         # 2. If no GPU is readily available, try to free one up via preemption.
         if not gpu:
-            victim_job, victim_gpu = self.cluster.find_preemptible_job()
+            victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
             if victim_job and victim_gpu:
                 # Preempting the training job makes its GPU idle and thus convertible.
                 victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
@@ -178,7 +178,7 @@ class Scheduler:
             return True
 
         # If no space, try to preempt a training job
-        victim_job, victim_gpu = self.cluster.find_preemptible_job()
+        victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
         if victim_job and victim_gpu:
             victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
             self.preemption_map[victim_gpu.gpu_id] = victim_job
@@ -204,7 +204,7 @@ class Scheduler:
         if gpus_still_needed > 0:
             preempted_gpus = []
             for _ in range(gpus_still_needed):
-                victim_job, victim_gpu = self.cluster.find_preemptible_job()
+                victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
                 # Ensure we don't try to preempt from a GPU we just allocated as idle
                 if victim_job and victim_gpu and victim_gpu not in allocated_gpus:
                     victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
@@ -243,7 +243,7 @@ class Scheduler:
             is_high_memory_job = mem_slice_per_gpu > effective_gpu_mem
 
             if not is_high_memory_job:
-                extra_gpus_to_request = math.floor(gpus_needed * 0.2)
+                extra_gpus_to_request = math.floor(gpus_needed * 0.5)
                 if extra_gpus_to_request > 0:
                     # The inference pool is now only used for these extra GPUs.
                     extra_gpus = self.cluster.find_idle_borrowable_gpus(extra_gpus_to_request)

@@ -52,7 +52,7 @@ class ClusterManager:
                     return gpu
         return None
 
-    def find_resources_for_llm_batch(self, num_jobs_needed):
+    def find_resources_for_llm_batch(self, num_jobs_needed, current_time):
         """
         Finds available resources for an LLM batch with a multi-level priority.
         """
@@ -93,7 +93,9 @@ class ClusterManager:
         for gpu in self.inference_gpus:
             if gpu.gpu_id not in active_or_convertible_ids and gpu.sharable:
                 for job in gpu.get_running_training_jobs():
-                    potential_victims.append((job, gpu))
+                    # NEW: Only consider this job a victim if it's not in its cooldown period.
+                    if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN:
+                        potential_victims.append((job, gpu))
 
         num_to_preempt = min(len(potential_victims), jobs_still_unassigned)
         victims_to_preempt = potential_victims[:num_to_preempt]
@@ -139,13 +141,30 @@ class ClusterManager:
         borrowable_gpus = [gpu for gpu in self.inference_gpus if gpu.is_idle() and gpu.sharable]
         return borrowable_gpus[:count]
 
-    def find_preemptible_job(self):
+    def find_preemptible_job(self, current_time):
+        """
+        Finds the best training job to preempt based on a Least Recently Preempted policy.
+        """
+        potential_victims = []
+        
+        # 1. Find all possible victims running on sharable, inference GPUs.
         for gpu in self.inference_gpus:
             if gpu.sharable:
                 for job in gpu.get_running_training_jobs():
-                    return (job, gpu)
-        print(f"DEBUG: No victim found.")
-        return (None, None)
+                    # NEW: Only consider this job a victim if it's not in its cooldown period.
+                    if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN:
+                        potential_victims.append((job, gpu))
+                    
+        # 2. If no victims exist, return None.
+        if not potential_victims:
+            return (None, None)
+            
+        # 3. Sort the list of victims by their last preemption time (ascending).
+        #    Jobs that have never been preempted (time = -1) will automatically be first.
+        potential_victims.sort(key=lambda item: item[0].last_preemption_time)
+        
+        # 4. Return the best victim (the first one in the sorted list).
+        return potential_victims[0]
 
     def release_resources_for_job(self, job):
         for gpu in job.assigned_gpus:

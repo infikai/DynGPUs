@@ -3,8 +3,9 @@
 # --- Global Constants ---
 GPU_MEMORY_GB = 32
 GPU_UTILIZATION_PERCENT = 100
-PREEMPTION_OVERHEAD = 2
-RECLAMATION_OVERHEAD = 6 # 30 for Horovod
+PREEMPTION_OVERHEAD = 3
+RECLAMATION_OVERHEAD = 6
+PREEMPTION_COOLDOWN = 20  # <-- ADD THIS LINE
 SHARABLE_GPU_MEM_PENALTY_GB = 1.5
 
 # --- Policy Constants ---
@@ -138,6 +139,7 @@ class Job:
         self.turnaround_time = -1
         self.paused_until = -1
         self.gpus_needed = 1
+        self.last_preemption_time = -1
         
     # ** NEW: Add __repr__ for detailed, developer-friendly printing **
     def __repr__(self):
@@ -163,6 +165,7 @@ class Job:
     def preempt_and_pause(self, gpu_to_release, current_time):
         """Handles the logic of being preempted from one GPU."""
         
+        self.last_preemption_time = current_time
         # ** NEW DEBUG PRINTS: Show the state of the GPU during preemption **
         print(f"-> [DEBUG] PREEMPT START: Job {self.id} being preempted from GPU {gpu_to_release.gpu_id}.")
         print(f"   [DEBUG] GPU state BEFORE release: Mem={gpu_to_release.available_memory:.2f}, Util={gpu_to_release.available_utilization:.2f}, Tasks={gpu_to_release.running_tasks.keys()}")
