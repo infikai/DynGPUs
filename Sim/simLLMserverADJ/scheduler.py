@@ -187,14 +187,14 @@ class Scheduler:
         available_slots, victims_to_preempt = self.cluster.find_resources_for_llm_batch(num_jobs)
         
         # 2. Perform all necessary preemptions found in the previous step.
-        if victims_to_preempt:
-            gpus_preempted = set()
-            for victim_job, victim_gpu in victims_to_preempt:
-                if victim_gpu.gpu_id not in gpus_preempted:
-                    victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
-                    self.preemption_map[victim_gpu.gpu_id] = victim_job
-                    self.preemption_count += 1
-                    gpus_preempted.add(victim_gpu.gpu_id)
+        # if victims_to_preempt:
+        #     gpus_preempted = set()
+        #     for victim_job, victim_gpu in victims_to_preempt:
+        #         if victim_gpu.gpu_id not in gpus_preempted:
+        #             victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+        #             self.preemption_map[victim_gpu.gpu_id] = victim_job
+        #             self.preemption_count += 1
+        #             gpus_preempted.add(victim_gpu.gpu_id)
 
         # 3. Assign jobs to the pool of available slots.
         assigned_count = 0

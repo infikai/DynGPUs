@@ -98,6 +98,11 @@ def load_llm_jobs_from_csv(file_path):
             for row in df.itertuples()]
 
     print(f"➡️ Successfully loaded {len(jobs)} LLM inference jobs.")
+    if jobs:
+        print("\n--- Example LLM Job (after processing) ---")
+        print(f"{jobs[0]!r}") # Using !r to call the __repr__ method
+        print("-------------------------------------------\n")
+
     return jobs
 
 if __name__ == "__main__":
@@ -116,7 +121,7 @@ if __name__ == "__main__":
     simulation_start_time = time.time()
     print("🚀 Starting Simulation...")
     cluster = ClusterManager(num_training_gpus=700, 
-                             num_inference_gpus=300)
+                             num_inference_gpus=100)
     
     job_workload = load_jobs_from_csv(args.csv_file)
     if args.llm_trace:
