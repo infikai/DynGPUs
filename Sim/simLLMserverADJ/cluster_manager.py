@@ -53,24 +53,24 @@ class ClusterManager:
         return None
 
     def find_resources_for_llm_batch(self, num_jobs_needed):
-    """
-    Finds available slots for an LLM batch ONLY from the existing pool of
-    active LLM servers, with a multi-level priority.
-    """
-    available_slots = []
-    
-    # Find all GPUs currently designated as LLM servers
-    active_server_gpus = [gpu for gpu in self.inference_gpus if gpu.is_llm_server]
-    
-    # Sort them to prioritize filling non-sharable and busier servers first
-    active_server_gpus.sort(key=lambda gpu: (gpu.sharable, gpu.llm_slots_available))
-    
-    for gpu in active_server_gpus:
-        for _ in range(gpu.llm_slots_available):
-            available_slots.append(gpu)
+        """
+        Finds available slots for an LLM batch ONLY from the existing pool of
+        active LLM servers, with a multi-level priority.
+        """
+        available_slots = []
+        
+        # Find all GPUs currently designated as LLM servers
+        active_server_gpus = [gpu for gpu in self.inference_gpus if gpu.is_llm_server]
+        
+        # Sort them to prioritize filling non-sharable and busier servers first
+        active_server_gpus.sort(key=lambda gpu: (gpu.sharable, gpu.llm_slots_available))
+        
+        for gpu in active_server_gpus:
+            for _ in range(gpu.llm_slots_available):
+                available_slots.append(gpu)
 
-    # This function no longer handles preemption; it only returns available slots.
-    return available_slots, []
+        # This function no longer handles preemption; it only returns available slots.
+        return available_slots, []
     
     def find_gpu_for_llm_job(self):
         """
