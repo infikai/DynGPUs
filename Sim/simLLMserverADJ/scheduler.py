@@ -216,15 +216,20 @@ class Scheduler:
             # Fill this one GPU with as many jobs as it can take
             for _ in range(slots_to_fill):
                 if job_index >= num_jobs_to_assign:
-                    break # Stop if we run out of jobs
+                    break 
                 
                 job = llm_jobs[job_index]
-                job.start_time = self.clock.current_time # Set start time
-                gpu.assign_llm_task(job) # This now only assigns the task
+                job.start_time = self.clock.current_time
+                
+                # --- THIS IS THE FIX ---
+                job.assigned_gpus = [gpu]
+                # -----------------------
+                
+                gpu.assign_llm_task(job) 
                 self.running_jobs.append(job)
                 
                 assigned_count += 1
-                job_index += 1 # Move to the next job
+                job_index += 1
 
         # Return any jobs that are left over
         unassigned_jobs = llm_jobs[assigned_count:]
