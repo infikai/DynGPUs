@@ -174,7 +174,7 @@ class Scheduler:
 
             for gpu_to_revert in gpus_to_revert:
                 if gpu_to_revert.running_tasks:
-                    print(f"    Policy: Forcing eviction from busy server {gpu_to_revert.gpu_id}...")
+                    # print(f"    Policy: Forcing eviction from busy server {gpu_to_revert.gpu_id}...")
                     tasks_to_evict = list(gpu_to_revert.running_tasks.values())
                     for task in tasks_to_evict:
                         job = task['job']
