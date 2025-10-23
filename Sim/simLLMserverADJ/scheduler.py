@@ -117,83 +117,77 @@ class Scheduler:
         # 4. Scale up or down to meet the target
         gpus_to_change = target_llm_gpus - len(current_llm_gpus)
 
-        if gpus_to_change > 0: # --- Scale UP ---
-            
-            # Step A: Find and convert all available idle GPUs
-            candidates = [gpu for gpu in self.cluster.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
-            # candidates.sort(key=lambda gpu: gpu.sharable) # Prioritize non-sharable
-            
+        if gpus_to_change > 0: # --- Scale UP (NEW PRIORITY) ---
+        
+            print(f"    Policy: Scaling UP by {gpus_to_change} servers.")
             num_converted = 0
-            for gpu in candidates:
-                if num_converted >= gpus_to_change:
-                    break
+
+            # Step A: Find and convert idle NON-SHARABLE GPUs
+            candidates_nonsharable = [gpu for gpu in self.cluster.inference_gpus if not gpu.is_llm_server and gpu.is_idle() and not gpu.sharable]
+            
+            for gpu in candidates_nonsharable:
+                if num_converted >= gpus_to_change: break
                 gpu.convert_to_llm_server()
                 num_converted += 1
 
-            # Step B: If still not enough, preempt training jobs
+            # Step B: If still not enough, preempt training jobs from SHARABLE GPUs
             gpus_still_needed = gpus_to_change - num_converted
             if gpus_still_needed > 0:
-                print("Try to preempt gpu for llm server ...")
+                print(f"    Policy: Preempting {gpus_still_needed} training jobs to create more servers.")
                 for _ in range(gpus_still_needed):
                     victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
-                    
                     if victim_job and victim_gpu:
                         victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
                         self.preemption_map[victim_gpu.gpu_id] = victim_job
                         self.preemption_count += 1
                         victim_gpu.convert_to_llm_server()
+                        num_converted += 1
                     else:
-                        print("Not found")
-                        break 
+                        print("    Policy: No more victims to preempt.")
+                        break # No more victims
+
+            # Step C: If STILL not enough, convert idle SHARABLE GPUs (last resort)
+            gpus_still_needed = gpus_to_change - num_converted
+            if gpus_still_needed > 0:
+                print(f"    Policy: Using {gpus_still_needed} idle sharable GPUs as last resort.")
+                candidates_sharable = [gpu for gpu in self.cluster.inference_gpus if not gpu.is_llm_server and gpu.is_idle() and gpu.sharable]
+                for gpu in candidates_sharable:
+                    if num_converted >= gpus_to_change: break
+                    gpu.convert_to_llm_server()
+                    num_converted += 1
 
         elif gpus_to_change < 0: # --- Scale DOWN ---
-            
+            # (Scale-down logic is unchanged)
+            print(f"    Policy: Scaling DOWN by {abs(gpus_to_change)} servers.")
             num_to_revert = abs(gpus_to_change)
-        
-            # Prioritize candidates for reversion:
-            # 1. Empty servers (non-disruptive)
-            # 2. Busy servers (disruptive)
-            # Within each group, prioritize sharable servers (False < True)
+            
             empty_servers = [gpu for gpu in current_llm_gpus if not gpu.running_tasks]
             busy_servers = [gpu for gpu in current_llm_gpus if gpu.running_tasks]
             
-            empty_servers.sort(key=lambda gpu: not gpu.sharable) # Sharable (False) first
-            busy_servers.sort(key=lambda gpu: not gpu.sharable)  # Sharable (False) first
+            empty_servers.sort(key=lambda gpu: not gpu.sharable)
+            busy_servers.sort(key=lambda gpu: not gpu.sharable)
             
             all_candidates = empty_servers + busy_servers
-            
-            # Select the top candidates to revert
             gpus_to_revert = all_candidates[:num_to_revert]
 
+            print(f"    Policy: Found {len(empty_servers)} empty servers and {len(busy_servers)} busy servers. Reverting {len(gpus_to_revert)}.")
+
             for gpu_to_revert in gpus_to_revert:
-                
-                # --- NEW EVICTION BLOCK ---
                 if gpu_to_revert.running_tasks:
-                    # print(f"    Policy: Forcing eviction from busy server {gpu_to_revert.gpu_id}...")
-                    
-                    # Must copy to a list, as we are modifying the dict during iteration
+                    print(f"    Policy: Forcing eviction from busy server {gpu_to_revert.gpu_id}...")
                     tasks_to_evict = list(gpu_to_revert.running_tasks.values())
-                    
                     for task in tasks_to_evict:
                         job = task['job']
-                        # Remove from scheduler's running list
                         self.running_jobs.remove(job) 
-                        # Add to retry queue
                         self.jobs_to_retry.append(job) 
-                        # Remove from GPU's task list and free the slot
                         gpu_to_revert.release_task(job) 
                 
-                # --- END EVICTION BLOCK ---
-                
-                # Now the GPU is guaranteed to be empty.
-                # Proceed with the standard revert & reclaim check.
                 if gpu_to_revert.gpu_id in self.preemption_map:
                     reclaiming_job = self.preemption_map.pop(gpu_to_revert.gpu_id)
                     reverted = gpu_to_revert.revert_from_llm_server()
                     if reverted and reclaiming_job in self.running_jobs:
                         reclaiming_job.reclaim_gpu(gpu_to_revert, self.clock.current_time)
                         self.reclamation_count += 1
-                        print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu_to_revert.gpu_id} for training job {reclaiming_job.id}.")
                     elif not reverted:
                         self.preemption_map[gpu_to_revert.gpu_id] = reclaiming_job
                 else:
