@@ -121,7 +121,7 @@ class Scheduler:
             
             # Step A: Find and convert all available idle GPUs
             candidates = [gpu for gpu in self.cluster.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
-            candidates.sort(key=lambda gpu: gpu.sharable) # Prioritize non-sharable
+            # candidates.sort(key=lambda gpu: gpu.sharable) # Prioritize non-sharable
             
             num_converted = 0
             for gpu in candidates:
@@ -133,6 +133,7 @@ class Scheduler:
             # Step B: If still not enough, preempt training jobs
             gpus_still_needed = gpus_to_change - num_converted
             if gpus_still_needed > 0:
+                print("Try to preempt gpu for llm server ...")
                 for _ in range(gpus_still_needed):
                     victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
                     
@@ -142,6 +143,7 @@ class Scheduler:
                         self.preemption_count += 1
                         victim_gpu.convert_to_llm_server()
                     else:
+                        print("Not found")
                         break 
 
         elif gpus_to_change < 0: # --- Scale DOWN ---
