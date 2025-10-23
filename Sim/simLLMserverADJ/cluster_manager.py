@@ -65,14 +65,12 @@ class ClusterManager:
         
         available_gpus.extend(active_server_gpus)
 
-        # --- Priority 3 & 4: Get all convertible idle GPUs ---
-        convertible_gpus = [gpu for gpu in self.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
-        convertible_gpus.sort(key=lambda gpu: gpu.sharable)
+        # # --- Priority 3 & 4: Get all convertible idle GPUs ---
+        # convertible_gpus = [gpu for gpu in self.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
+        # convertible_gpus.sort(key=lambda gpu: gpu.sharable)
 
-        # --- THIS IS THE FIX ---
-        # Just add the GPU *once*. The scheduler will handle filling it.
-        available_gpus.extend(convertible_gpus)
-        # --- END FIX ---
+        # # Just add the GPU *once*. The scheduler will handle filling it.
+        # available_gpus.extend(convertible_gpus)
 
         # Return the list of GPUs. The adaptive policy will handle preemption.
         return available_gpus, []
