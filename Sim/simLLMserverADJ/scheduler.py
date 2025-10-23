@@ -486,10 +486,10 @@ class Scheduler:
                       f"LLM Servers={num_llm_servers}, "
                       f"Completed={len(self.completed_jobs)}")
                 
-                if len(self.running_jobs) > 0 and num_llm_jobs == 0:
-                        print("    [DEBUG] No LLM jobs found. Running jobs have types:")
-                        for job in self.running_jobs:
-                            print(f"    - Job {job.id}, Type: '{job.job_type}'")
+                # if len(self.running_jobs) > 0 and num_llm_jobs == 0:
+                #         print("    [DEBUG] No LLM jobs found. Running jobs have types:")
+                #         for job in self.running_jobs:
+                #             print(f"    - Job {job.id}, Type: '{job.job_type}'")
             
             # --- Fairer Dispatch Logic (prevents Head-of-Line Blocking) ---
             # 1. Combine jobs to be attempted this tick, prioritizing retries.
