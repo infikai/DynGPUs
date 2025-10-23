@@ -167,7 +167,7 @@ class Scheduler:
                 
                 # --- NEW EVICTION BLOCK ---
                 if gpu_to_revert.running_tasks:
-                    print(f"    Policy: Forcing eviction from busy server {gpu_to_revert.gpu_id}...")
+                    # print(f"    Policy: Forcing eviction from busy server {gpu_to_revert.gpu_id}...")
                     
                     # Must copy to a list, as we are modifying the dict during iteration
                     tasks_to_evict = list(gpu_to_revert.running_tasks.values())
