@@ -191,6 +191,7 @@ class Scheduler:
                     if reverted and reclaiming_job in self.running_jobs:
                         reclaiming_job.reclaim_gpu(gpu_to_revert, self.clock.current_time)
                         self.reclamation_count += 1
+                        print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu_to_revert.gpu_id} for training job {reclaiming_job.id}.")
                     elif not reverted:
                         self.preemption_map[gpu_to_revert.gpu_id] = reclaiming_job
                 else:
