@@ -85,8 +85,8 @@ class GPU:
 
     # NEW: Dedicated method to revert an LLM server to a regular GPU
     def revert_from_llm_server(self):
-        if not self.is_llm_server or not self.is_idle():
-            # Can only revert an idle LLM GPU
+        if not self.is_llm_server or self.running_tasks:
+            # Can only revert an LLM server that is empty.
             return False
         
         self.is_llm_server = False
