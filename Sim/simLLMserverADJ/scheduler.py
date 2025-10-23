@@ -146,14 +146,45 @@ class Scheduler:
 
         elif gpus_to_change < 0: # --- Scale DOWN ---
             
-            candidates = [gpu for gpu in current_llm_gpus if not gpu.running_tasks]
-            candidates.sort(key=lambda gpu: (not gpu.sharable, -gpu.llm_slots_available))
-
-            num_to_revert = min(abs(gpus_to_change), len(candidates))
+            num_to_revert = abs(gpus_to_change)
+        
+            # Prioritize candidates for reversion:
+            # 1. Empty servers (non-disruptive)
+            # 2. Busy servers (disruptive)
+            # Within each group, prioritize sharable servers (False < True)
+            empty_servers = [gpu for gpu in current_llm_gpus if not gpu.running_tasks]
+            busy_servers = [gpu for gpu in current_llm_gpus if gpu.running_tasks]
             
-            for i in range(num_to_revert):
-                gpu_to_revert = candidates[i]
+            empty_servers.sort(key=lambda gpu: not gpu.sharable) # Sharable (False) first
+            busy_servers.sort(key=lambda gpu: not gpu.sharable)  # Sharable (False) first
+            
+            all_candidates = empty_servers + busy_servers
+            
+            # Select the top candidates to revert
+            gpus_to_revert = all_candidates[:num_to_revert]
+
+            for gpu_to_revert in gpus_to_revert:
                 
+                # --- NEW EVICTION BLOCK ---
+                if gpu_to_revert.running_tasks:
+                    print(f"    Policy: Forcing eviction from busy server {gpu_to_revert.gpu_id}...")
+                    
+                    # Must copy to a list, as we are modifying the dict during iteration
+                    tasks_to_evict = list(gpu_to_revert.running_tasks.values())
+                    
+                    for task in tasks_to_evict:
+                        job = task['job']
+                        # Remove from scheduler's running list
+                        self.running_jobs.remove(job) 
+                        # Add to retry queue
+                        self.jobs_to_retry.append(job) 
+                        # Remove from GPU's task list and free the slot
+                        gpu_to_revert.release_task(job) 
+                
+                # --- END EVICTION BLOCK ---
+                
+                # Now the GPU is guaranteed to be empty.
+                # Proceed with the standard revert & reclaim check.
                 if gpu_to_revert.gpu_id in self.preemption_map:
                     reclaiming_job = self.preemption_map.pop(gpu_to_revert.gpu_id)
                     reverted = gpu_to_revert.revert_from_llm_server()
