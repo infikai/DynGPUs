@@ -116,8 +116,10 @@ class Scheduler:
         
         # 4. Scale up or down to meet the target
         gpus_to_change = target_llm_gpus - len(current_llm_gpus)
+        
+        ratio = abs(gpus_to_change / current_llm_gpus)
 
-        if gpus_to_change > 0: # --- Scale UP (NEW PRIORITY) ---
+        if gpus_to_change > 0 and ratio >= 0.1: # --- Scale UP (NEW PRIORITY) ---
         
             print(f"    Policy: Scaling UP by {gpus_to_change} servers.")
             num_converted = 0
@@ -156,7 +158,7 @@ class Scheduler:
                     gpu.convert_to_llm_server()
                     num_converted += 1
 
-        elif gpus_to_change < 0: # --- Scale DOWN ---
+        elif gpus_to_change < 0 and ratio >= 0.1: # --- Scale DOWN ---
             # (Scale-down logic is unchanged)
             print(f"    Policy: Scaling DOWN by {abs(gpus_to_change)} servers.")
             num_to_revert = abs(gpus_to_change)
