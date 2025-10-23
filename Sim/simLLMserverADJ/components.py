@@ -156,7 +156,7 @@ class Job:
     def __repr__(self):
         return (f"<Job id={self.id} type={self.job_type} "
                 f"mem_req={self.memory_required:.2f} util_req={self.utilization_required:.2f} "
-                f"gpus_needed={self.gpus_needed} duration={self.base_duration}>")
+                f"gpus_needed={self.gpus_needed} duration={self.base_duration} remain={self.remaining_work}>")
 
     def assign_resources(self, gpus, current_time):
         self.assigned_gpus = gpus
