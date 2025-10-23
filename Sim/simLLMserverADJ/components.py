@@ -143,7 +143,7 @@ class Job:
             time_to_generate_output = LLM_TPOT * self.output_tokens
             self.base_duration = LLM_BASE_TTFT + time_to_process_input + time_to_generate_output
         
-        self.remaining_work = base_duration
+        self.remaining_work = self.base_duration
         self.assigned_gpus = []
         self.start_time = -1
         self.completion_time = -1
