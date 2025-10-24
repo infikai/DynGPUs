@@ -117,7 +117,7 @@ class Scheduler:
         # 4. Scale up or down to meet the target
         gpus_to_change = target_llm_gpus - len(current_llm_gpus)
         
-        ratio = abs(gpus_to_change / current_llm_gpus)
+        ratio = abs(gpus_to_change / len(current_llm_gpus))
 
         if gpus_to_change > 0 and ratio >= 0.1: # --- Scale UP (NEW PRIORITY) ---
         
