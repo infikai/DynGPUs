@@ -35,6 +35,7 @@ def analyze_borrow_eligibility(file_path):
         return
 
     eligible_count = 0
+    one_gpu_count = 0
     ineligible_jobs = [] # List to store details of ineligible jobs
     effective_gpu_mem = GPU_MEMORY_GB - SHARABLE_GPU_MEM_PENALTY_GB
 
@@ -54,6 +55,9 @@ def analyze_borrow_eligibility(file_path):
         mem_slice_per_gpu = job['memory_required'] / gpus_needed
         is_high_memory_job = mem_slice_per_gpu > effective_gpu_mem
 
+        if gpus_needed == 1:
+            one_gpu_count += 1
+
         if not is_high_memory_job:
             eligible_count += 1
         else:
@@ -68,6 +72,7 @@ def analyze_borrow_eligibility(file_path):
     print("\n--- Analysis Complete ---")
     print(f"Total training jobs found: {len(training_df)}")
     print(f"Number of training jobs eligible to borrow GPUs: {eligible_count}")
+    print(f"Number of training jobs require one GPU: {one_gpu_count}")
 
     # --- Print the detailed list of ineligible jobs ---
     if ineligible_jobs:
