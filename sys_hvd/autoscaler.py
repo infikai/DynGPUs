@@ -280,6 +280,8 @@ async def scale_up(count: int) -> bool:
 
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
+        log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_UP: Full scale-up of {len(successfully_woken)} server(s) took {time.time() - start_time:.2f}s.\n"
+        with open(SERVER_COUNT_LOG_FILE, "a") as f: f.write(log_entry)
         return True
     
     print("ERROR: Nginx update failed. Reverting all woken servers...")
