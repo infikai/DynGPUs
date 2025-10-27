@@ -173,14 +173,12 @@ def train(state):
             # if hvd.rank() == 0 and idx == 0:    
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
-            # if args.sleep > 0 and idx == 0:
-            #     print(f'Sleep {args.sleep}s')
-            #     time.sleep(args.sleep)
+            end_train = time.time()
             loss.backward()
             # if hvd.rank() == 0 and idx == 0:    
             #     print(f'Time: {time.time() - int_train}s')
-        end_train = time.time()
-        # print(f'Local train time: {end_train - start_train}s')
+        
+        print(f'Local train time: {end_train - start_train}s')
 
         # Elastic Horovod: record which samples were processed this batch
         # so we do not reprocess them if a reset event occurs
