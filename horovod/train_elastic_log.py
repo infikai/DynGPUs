@@ -20,7 +20,7 @@ last_log_time = time.time()
 # Training settings
 parser = argparse.ArgumentParser(description='Elastic PyTorch ImageNet Example',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--train-dir', default=os.path.expanduser('/mydata/Data/imagenet/train'),
+parser.add_argument('--train-dir', default=os.path.expanduser('/localdata/Data/imagenet/train'),
                     help='path to training data')
 parser.add_argument('--val-dir', default=os.path.expanduser('/mydata/Data/imagenet/val'),
                     help='path to validation data')
@@ -141,46 +141,46 @@ def train(state):
         # Split data into sub-batches of size batch_size
         start_train = time.time()
         for i in range(0, len(data), args.batch_size):
-            if hvd.rank() == 0 and idx == 0:
-                print(f'Time: {time.time() - start_train}s')
-                int_train = time.time()
+            # if hvd.rank() == 0 and idx == 0:
+            #     print(f'Time: {time.time() - start_train}s')
+            #     int_train = time.time()
             data_batch = data[i:i + args.batch_size]
-            if hvd.rank() == 0 and idx == 0:
-                print(f'Time: {time.time() - int_train}s')
-                int_train = time.time()
+            # if hvd.rank() == 0 and idx == 0:
+            #     print(f'Time: {time.time() - int_train}s')
+            #     int_train = time.time()
             target_batch = target[i:i + args.batch_size]
-            if hvd.rank() == 0 and idx == 0:    
-                print(f'Time: {time.time() - int_train}s')
-                int_train = time.time()
+            # if hvd.rank() == 0 and idx == 0:    
+            #     print(f'Time: {time.time() - int_train}s')
+            #     int_train = time.time()
             output = model(data_batch)
-            if hvd.rank() == 0 and idx == 0:    
-                print(f'Time: {time.time() - int_train}s')
-                int_train = time.time()
+            # if hvd.rank() == 0 and idx == 0:    
+            #     print(f'Time: {time.time() - int_train}s')
+            #     int_train = time.time()
             train_accuracy.update(accuracy(output, target_batch))
-            if hvd.rank() == 0 and idx == 0:
-                print(f'Time: {time.time() - int_train}s')
-                int_train = time.time()
+            # if hvd.rank() == 0 and idx == 0:
+            #     print(f'Time: {time.time() - int_train}s')
+            #     int_train = time.time()
             loss = F.cross_entropy(output, target_batch)
-            if hvd.rank() == 0 and idx == 0:
-                print(f'Time: {time.time() - int_train}s')
-                int_train = time.time()
+            # if hvd.rank() == 0 and idx == 0:
+            #     print(f'Time: {time.time() - int_train}s')
+            #     int_train = time.time()
             train_loss.update(loss)
-            if hvd.rank() == 0 and idx == 0:
-                print(f'Time: {time.time() - int_train}s')
-                int_train = time.time()
+            # if hvd.rank() == 0 and idx == 0:
+            #     print(f'Time: {time.time() - int_train}s')
+            #     int_train = time.time()
             # Average gradients among sub-batches
             loss.div_(math.ceil(float(len(data)) / args.batch_size))
-            if hvd.rank() == 0 and idx == 0:    
-                print(f'Time: {time.time() - int_train}s')
-                int_train = time.time()
-            if args.sleep > 0 and idx == 0:
-                print(f'Sleep {args.sleep}s')
-                time.sleep(args.sleep)
+            # if hvd.rank() == 0 and idx == 0:    
+            #     print(f'Time: {time.time() - int_train}s')
+            #     int_train = time.time()
+            # if args.sleep > 0 and idx == 0:
+            #     print(f'Sleep {args.sleep}s')
+            #     time.sleep(args.sleep)
             loss.backward()
-            if hvd.rank() == 0 and idx == 0:    
-                print(f'Time: {time.time() - int_train}s')
+            # if hvd.rank() == 0 and idx == 0:    
+            #     print(f'Time: {time.time() - int_train}s')
         end_train = time.time()
-        print(f'Local train time: {end_train - start_train}s')
+        # print(f'Local train time: {end_train - start_train}s')
 
         # Elastic Horovod: record which samples were processed this batch
         # so we do not reprocess them if a reset event occurs
