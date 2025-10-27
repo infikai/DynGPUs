@@ -86,14 +86,14 @@ def train(state):
                             level=logging.INFO,
                             format='%(asctime)s - %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S')
-        logging.info("Starting training run.")
+        logging.info("Training run.")
     # Log when train() is called, which happens initially and after a host update
-    if hvd.rank() == 2:
-        logging.info('Train() has been called.')
+    # if hvd.rank() == 2:
+    #     logging.info('Train() has been called.')
     print(f'Train() been called in rank {hvd.rank()}')
     start_modeltrain = time.time()
     model.train()
-    print(f'model.train time: {time.time() - start_modeltrain}s')
+    # print(f'model.train time: {time.time() - start_modeltrain}s')
     epoch = state.epoch
     train_loss = Metric('train_loss')
     train_accuracy = Metric('train_accuracy')
@@ -124,6 +124,7 @@ def train(state):
             print(f'state commited! took {end - start}s')
         elif args.batches_per_host_check > 0 and \
                 state.batch % args.batches_per_host_check == 0:
+            logging.info("Checking host update.")
             state.check_host_updates()
 
         adjust_learning_rate(epoch, batch_idx)
