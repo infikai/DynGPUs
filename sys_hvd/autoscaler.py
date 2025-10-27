@@ -53,7 +53,7 @@ def read_horovod_hostfile() -> List[int]:
                 line = line.strip()
                 if line.startswith("node2:"):
                     count = int(line.split(':')[1])
-                    active_ranks = sorted(ALL_SHARED_RANKS)[:count-1] if count > 0 else []
+                    active_ranks = sorted(ALL_SHARED_RANKS)[:count] if count > 0 else []
                     print(active_ranks)
                     return active_ranks
     except (FileNotFoundError, IndexError, ValueError):
