@@ -225,6 +225,9 @@ async def scale_up(count: int) -> bool:
     Scales up by waking servers, prioritizing dedicated servers, then shared
     servers with the HIGHEST rank.
     """
+
+    start_time = time.time()
+
     all_sleeping = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
     dedicated_sleeping = [s for s in all_sleeping if not s['shared']]
     shared_sleeping = [s for s in all_sleeping if s['shared']]
