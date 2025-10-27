@@ -177,17 +177,17 @@ def main():
                     ST_batch = time.time()
                     images, target = next(data_iterator)
                     images, target = images.cuda(), target.cuda()
-                    base_optimizer.zero_grad()
+                    hvd_optimizer.zero_grad()
                     output = model(images)
                     loss = F.cross_entropy(output, target)
                     loss.backward()
-                    if active_set is None:
-                        allreduce_name = "grads_full_world"
-                    else:
-                        ranks_str = "_".join(map(str, sorted(current_active_ranks)))
-                        allreduce_name = f"grads_set_{ranks_str}"
-                    allreduce_gradients_manual(model, active_set, name=allreduce_name)
-                    base_optimizer.step()
+                    # if active_set is None:
+                    #     allreduce_name = "grads_full_world"
+                    # else:
+                    #     ranks_str = "_".join(map(str, sorted(current_active_ranks)))
+                    #     allreduce_name = f"grads_set_{ranks_str}"
+                    # allreduce_gradients_manual(model, active_set, name=allreduce_name)
+                    hvd_optimizer.step()
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
                     sampler.record_batch(state.batch_idx, args.batch_size)
                     state.batch_idx += 1
