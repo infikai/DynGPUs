@@ -116,13 +116,7 @@ def train(state):
         # and commit / check for host updates. Do not check hosts when
         # we commit as it would be redundant.
         state.batch = batch_idx = batch_offset + idx
-        if args.batches_per_commit > 0 and \
-                state.batch % args.batches_per_commit == 0:
-            start = time.time()
-            state.commit()
-            end = time.time()
-            print(f'state commited! took {end - start}s')
-        elif args.batches_per_host_check > 0 and \
+        if args.batches_per_host_check > 0 and \
                 state.batch % args.batches_per_host_check == 0:
             logging.info("Checking host update.")
             state.check_host_updates()
