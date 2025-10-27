@@ -71,6 +71,7 @@ def main():
     state = TrainingState()
     current_active_ranks = []
     process_set_cache = {}
+    hvd_optimizer = None
     
     # MODIFICATION: Initialize timer for periodic logging
     last_log_time = time.time()
@@ -136,6 +137,14 @@ def main():
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
+
+                    if hvd_optimizer != None:
+                        hvd_optimizer._unregister_hooks()
+                    if active_set is None:
+                        hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters())
+                    else:
+                        hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters(), process_set=active_set)
+
                     local_rank = current_active_ranks.index(hvd.rank())
                     sampler = MyElasticSampler(train_dataset)
                     sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
