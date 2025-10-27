@@ -299,7 +299,7 @@ async def scale_up(count: int) -> bool:
 # --- Background Tasks ---
 
 async def log_active_servers():
-    """Logs the number of active servers to a file every second."""
+    """Logs the number of active servers to a file every 5 seconds."""
     print(f"📝 Logging active server count to {SERVER_COUNT_LOG_FILE}...")
     while True:
         try:
@@ -307,7 +307,7 @@ async def log_active_servers():
                 f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}, {sum(1 for s in ALL_SERVERS if s['status'] == 'active')}\n")
         except Exception as e:
             print(f"\nERROR: Could not write to log file: {e}")
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
 async def autoscaler_task():
     """The main autoscaler loop that polls server metrics and triggers scaling."""
