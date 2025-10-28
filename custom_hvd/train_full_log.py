@@ -203,7 +203,7 @@ def main():
 
                     # MODIFICATION: Periodic progress logging
                     current_time = time.time()
-                    if hvd.rank() == 0 and (current_time - last_log_time) >= 10:
+                    if hvd.rank() == 0 and (current_time - last_log_time) >= 3:
                         logging.info(f"Progress - Epoch: {state.epoch}, Processed: {state.processed_num}")
                         last_log_time = current_time
 

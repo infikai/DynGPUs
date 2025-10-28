@@ -103,7 +103,7 @@ def train(state):
     start_init_loop = time.time()
     for idx, (data, target) in enumerate(train_loader):
         # Time-based logging every 10 seconds on rank 0
-        if hvd.rank() == 2 and time.time() - last_log_time > 10:
+        if hvd.rank() == 2 and time.time() - last_log_time > 3:
             epoch = state.epoch
             processed_num = state.train_sampler.state_dict()['processed_num']
             logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed_num}')
