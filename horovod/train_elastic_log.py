@@ -164,16 +164,16 @@ def train(state):
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             loss = F.cross_entropy(output, target_batch)
-            if hvd.rank() == 0 and idx == 0:
+            # if hvd.rank() == 0 and idx == 0:
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             train_loss.update(loss)
-            if hvd.rank() == 0 and idx == 0:
+            # if hvd.rank() == 0 and idx == 0:
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             # Average gradients among sub-batches
             loss.div_(math.ceil(float(len(data)) / args.batch_size))
-            if hvd.rank() == 0 and idx == 0:    
+            # if hvd.rank() == 0 and idx == 0:    
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             end_train = time.time()
