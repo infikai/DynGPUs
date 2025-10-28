@@ -72,6 +72,7 @@ def main():
     current_active_ranks = []
     process_set_cache = {}
     hvd_optimizer = None
+    fisrt_batch = True
     
     # MODIFICATION: Initialize timer for periodic logging
     last_log_time = time.time()
@@ -85,6 +86,7 @@ def main():
             if config_changed:
                 print("Config changing")
                 ST_config = time.time()
+                fisrt_batch = True
                 sync = True
 
                 if hvd.rank() == 0:
@@ -194,6 +196,10 @@ def main():
                     state.processed_num = sampler.get_processed_num()
                     if hvd.rank() == current_active_ranks[0]:
                         print(f"Epoch: {state.epoch} | Batch: {state.batch_idx-1} | Loss: {loss.item():.4f}")
+                        
+                    if hvd.rank() == 0 and fisrt_batch == True:
+                            logging.info(f"First Batch Cost: {time.time() - ST_batch}s")
+                    fisrt_batch = False
 
                     # MODIFICATION: Periodic progress logging
                     current_time = time.time()
