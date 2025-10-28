@@ -188,9 +188,10 @@ def train(state):
 
         # Elastic Horovod: record which samples were processed this batch
         # so we do not reprocess them if a reset event occurs
-        print(allreduce_batch_size)
+        # print(allreduce_batch_size)
         state.train_sampler.record_batch(idx, allreduce_batch_size)
         processed += allreduce_batch_size * hvd.size()
+        print(allreduce_batch_size * hvd.size())
 
         start_op = time.time()
         # Gradient is applied across all ranks
