@@ -81,6 +81,7 @@ parser.add_argument('--sleep', type=int, default=0,
 
 def train(state):
     global last_log_time
+    global processed
     # Configure logging to a file, only for the master worker (rank 0)
     if hvd.rank() == 2:
         logging.basicConfig(filename='worker_adjustments.log',
