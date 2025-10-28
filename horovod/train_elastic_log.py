@@ -16,6 +16,7 @@ import logging
 
 # Global variable to track the last log time for rank 0
 last_log_time = time.time()
+processed = 0
 
 # Training settings
 parser = argparse.ArgumentParser(description='Elastic PyTorch ImageNet Example',
@@ -106,7 +107,7 @@ def train(state):
         if hvd.rank() == 2 and time.time() - last_log_time > 3:
             epoch = state.epoch
             processed_num = state.train_sampler.state_dict()['processed_num']
-            logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed_num}')
+            logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed}')
             last_log_time = time.time()  # Reset the timer
 
         start_batch = time.time()
@@ -188,6 +189,7 @@ def train(state):
         # so we do not reprocess them if a reset event occurs
         print(allreduce_batch_size)
         state.train_sampler.record_batch(idx, allreduce_batch_size)
+        processed += allreduce_batch_size * hvd.size()
 
         start_op = time.time()
         # Gradient is applied across all ranks
