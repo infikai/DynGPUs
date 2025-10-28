@@ -210,10 +210,8 @@ def main():
                 except StopIteration:
                     epoch_finished = 1
             if hvd.rank() not in current_active_ranks:
-                hvd_optimizer._unregister_hooks()
-                del hvd_optimizer
-                hvd_optimizer = None
-                base_optimizer.zero_grad()
+                hvd_optimizer.zero_grad()
+                # base_optimizer.zero_grad()
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
                 torch.cuda.empty_cache()
