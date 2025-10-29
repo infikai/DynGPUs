@@ -15,7 +15,6 @@ import logging # MODIFICATION: Import logging
 
 # Hyperparameters
 EPOCHS = 90
-processed = 0
 
 class TrainingState:
     def __init__(self):
@@ -77,6 +76,7 @@ def main():
     
     # MODIFICATION: Initialize timer for periodic logging
     last_log_time = time.time()
+    processed = 0
 
     # Train
     while state.epoch < EPOCHS:
