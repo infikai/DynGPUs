@@ -212,7 +212,8 @@ def main():
                 except StopIteration:
                     epoch_finished = 1
             if hvd.rank() not in current_active_ranks:
-                hvd_optimizer.zero_grad()
+                if hvd_optimizer != None:
+                    hvd_optimizer.zero_grad()
                 # base_optimizer.zero_grad()
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
