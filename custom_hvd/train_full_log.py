@@ -217,7 +217,7 @@ def main():
                 # base_optimizer.zero_grad()
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
-                time.sleep(1)
+                # time.sleep(1)
                 torch.cuda.empty_cache()
             finished_tensor = torch.tensor(epoch_finished)
             finished_tensor = hvd.broadcast_object(finished_tensor, root_rank=0, name="epoch_end_bcast")
