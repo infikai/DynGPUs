@@ -15,6 +15,7 @@ import logging # MODIFICATION: Import logging
 
 # Hyperparameters
 EPOCHS = 90
+processed = 0
 
 class TrainingState:
     def __init__(self):
@@ -192,6 +193,7 @@ def main():
                     hvd_optimizer.step()
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
                     sampler.record_batch(state.batch_idx, args.batch_size)
+                    processed += args.batch_size * len(current_active_ranks)
                     state.batch_idx += 1
                     state.processed_num = sampler.get_processed_num()
                     if hvd.rank() == current_active_ranks[0]:
@@ -204,7 +206,7 @@ def main():
                     # MODIFICATION: Periodic progress logging
                     current_time = time.time()
                     if hvd.rank() == 0 and (current_time - last_log_time) >= 3:
-                        logging.info(f"Progress - Epoch: {state.epoch}, Processed: {state.processed_num}")
+                        logging.info(f"Progress - Epoch: {state.epoch}, Processed: {processed}")
                         last_log_time = current_time
 
                 except StopIteration:
