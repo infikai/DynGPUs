@@ -121,7 +121,7 @@ class ClusterManager:
             if gpu.sharable:
                 for job in gpu.get_running_training_jobs():
                     # NEW: Only consider this job a victim if it's not in its cooldown period.
-                    if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN:
+                    if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN or current_time == job.last_preemption_time:
                         potential_victims.append((job, gpu))
                     
         # 2. If no victims exist, return None.
