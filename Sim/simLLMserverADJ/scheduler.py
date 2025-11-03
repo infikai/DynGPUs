@@ -37,7 +37,7 @@ class Scheduler:
 
     def _initialize_logs(self):
         """Writes headers to the log files."""
-        self.training_log_file.write("job_id,arrival_time,base_duration,ideal_completion_time,actual_completion_time,performance_factor\n")
+        self.training_log_file.write("job_id,arrival_time,base_duration,ideal_completion_time,actual_completion_time,performance_factor,gpus\n")
         self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,borrowed_inference_gpus\n")
 
     def _log_gpu_usage(self):
