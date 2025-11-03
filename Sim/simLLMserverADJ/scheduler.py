@@ -412,7 +412,7 @@ class Scheduler:
             actual_duration = job.completion_time - job.arrival_time
             perf_factor = actual_duration / job.base_duration if job.base_duration > 0 else 0
             log_entry = (f"{job.id},{job.arrival_time},{job.base_duration},"
-                         f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f}\n")
+                         f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{job.gpus_needed}\n")
             self.training_log_file.write(log_entry)
 
         if job.job_type == 'inference' or job.job_type == 'llm_inference':
