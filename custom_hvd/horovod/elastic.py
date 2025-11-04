@@ -160,7 +160,9 @@ def run_fn(func, reset):
             while True:
                 try:
                     if not skip_sync:
+                        ST_sync = time.time()
                         state.sync()
+                        print(f'Sync Cost: {time.time() - ST_sync}s')
 
                     return func(state, *args, **kwargs)
                 except HorovodInternalError:
@@ -169,7 +171,9 @@ def run_fn(func, reset):
                 except HostsUpdatedInterrupt as e:
                     skip_sync = e.skip_sync
 
+                ST_reset = time.time()
                 reset()
+                print(f'Hvd reset Cost: {time.time() - ST_reset}s')
                 state.on_reset()
         finally:
             notification_manager.remove_listener(state)
