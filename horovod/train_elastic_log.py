@@ -109,7 +109,6 @@ def train(state):
             epoch = state.epoch
             processed_num = state.train_sampler.state_dict()['processed_num']
             logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed}')
-            logging.info(f'{processed_num}')
             last_log_time = time.time()  # Reset the timer
 
         start_batch = time.time()
@@ -337,7 +336,7 @@ if __name__ == '__main__':
         torch.cuda.set_device(hvd.local_rank())
         torch.cuda.manual_seed(args.seed)
 
-    cudnn.benchmark = True
+    # cudnn.benchmark = True
 
     # Horovod: print logs on the first worker.
     verbose = 1 if hvd.rank() == 0 else 0
