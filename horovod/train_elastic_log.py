@@ -83,14 +83,14 @@ def train(state):
     global last_log_time
     global processed
     # Configure logging to a file, only for the master worker (rank 0)
-    if hvd.rank() == 0:
+    if hvd.rank() == 1:
         logging.basicConfig(filename='worker_adjustments.log',
                             level=logging.INFO,
                             format='%(asctime)s - %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S')
         logging.info("Training run.")
     # Log when train() is called, which happens initially and after a host update
-    # if hvd.rank() == 0:
+    # if hvd.rank() == 1:
     #     logging.info('Train() has been called.')
     print(f'Train() been called in rank {hvd.rank()}')
     start_modeltrain = time.time()
@@ -105,7 +105,7 @@ def train(state):
     start_init_loop = time.time()
     for idx, (data, target) in enumerate(train_loader):
         # Time-based logging every 10 seconds on rank 0
-        if hvd.rank() == 0 and time.time() - last_log_time > 3:
+        if hvd.rank() == 1 and time.time() - last_log_time > 3:
             epoch = state.epoch
             processed_num = state.train_sampler.state_dict()['processed_num']
             logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed}')
@@ -143,44 +143,44 @@ def train(state):
         # Split data into sub-batches of size batch_size
         start_train = time.time()
         for i in range(0, len(data), args.batch_size):
-            if hvd.rank() == 0 and idx == 0:
+            if hvd.rank() == 1 and idx == 0:
                 logging.info("Train Loop.")
             #     print(f'Time: {time.time() - start_train}s')
             #     int_train = time.time()
             data_batch = data[i:i + args.batch_size]
-            #if hvd.rank() == 0 and idx == 0:
+            #if hvd.rank() == 1 and idx == 0:
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             target_batch = target[i:i + args.batch_size]
-            if hvd.rank() == 0 and idx == 0:  
+            if hvd.rank() == 1 and idx == 0:  
                 logging.info("Data.")  
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             output = model(data_batch)
-            if hvd.rank() == 0 and idx == 0:
+            if hvd.rank() == 1 and idx == 0:
                 logging.info("Forward pass.")
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             train_accuracy.update(accuracy(output, target_batch))
-            # if hvd.rank() == 0 and idx == 0:
+            # if hvd.rank() == 1 and idx == 0:
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             loss = F.cross_entropy(output, target_batch)
-            # if hvd.rank() == 0 and idx == 0:
+            # if hvd.rank() == 1 and idx == 0:
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             train_loss.update(loss)
-            # if hvd.rank() == 0 and idx == 0:
+            # if hvd.rank() == 1 and idx == 0:
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             # Average gradients among sub-batches
             loss.div_(math.ceil(float(len(data)) / args.batch_size))
-            # if hvd.rank() == 0 and idx == 0:    
+            # if hvd.rank() == 1 and idx == 0:    
             #     print(f'Time: {time.time() - int_train}s')
             #     int_train = time.time()
             end_train = time.time()
             loss.backward()
-            if hvd.rank() == 0 and idx == 0:
+            if hvd.rank() == 1 and idx == 0:
                 logging.info("Backward pass.")
             #     print(f'Time: {time.time() - int_train}s')
         
@@ -196,14 +196,14 @@ def train(state):
         start_op = time.time()
         # Gradient is applied across all ranks
         optimizer.step()
-        if hvd.rank() == 0 and idx == 0:
+        if hvd.rank() == 1 and idx == 0:
             logging.info("Backward pass.")
         end_batch = time.time()
 
-        if hvd.rank() == 0 and idx == 0:
+        if hvd.rank() == 1 and idx == 0:
             logging.info("First Batch done!.")
         
-        if hvd.rank() == 0:
+        if hvd.rank() == 1:
             if idx % 1 == 0:
                 print(f'Epoch: [{epoch + 1}][{idx}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
