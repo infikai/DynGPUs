@@ -105,6 +105,10 @@ class ClusterManager:
     def find_idle_gpus_for_training(self, count):
         idle_gpus = [gpu for gpu in self.training_gpus if gpu.is_idle()]
         return idle_gpus[:count] if len(idle_gpus) >= count else []
+
+    def find_all_idle_gpus_in_training_pool(self):
+        """Finds ALL idle GPUs in the training pool."""
+        return [gpu for gpu in self.training_gpus if gpu.is_idle()]
     
     def find_idle_borrowable_gpus(self, count):
         borrowable_gpus = [gpu for gpu in self.inference_gpus if gpu.is_idle() and gpu.sharable]
@@ -134,6 +138,39 @@ class ClusterManager:
         
         # 4. Return the best victim (the first one in the sorted list).
         return potential_victims[0]
+
+    def find_preemptible_job_in_training_pool(self, current_time):
+        """
+        Finds the best 'greedy' training job to preempt from the TRAINING pool.
+        A 'greedy' job is one running on more GPUs than its minimum requirement.
+        Policy is Least Recently Preempted (LRP).
+        """
+        # Use a dict to find each unique, eligible victim job only once
+        greedy_jobs = {} # job.id -> {'job': job_obj, 'gpu': one_of_its_training_gpus}
+        
+        for gpu in self.training_gpus:
+            for job in gpu.get_running_training_jobs():
+                if job.id not in greedy_jobs: # Check this job only once
+                    # Check if the job is "greedy"
+                    if len(job.assigned_gpus) > job.gpus_needed:
+                        # Check if it's not in its cooldown period
+                        if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN or current_time == job.last_preemption_time:
+                            # Store the job and the *first* training GPU we found it on
+                            greedy_jobs[job.id] = {'job': job, 'gpu': gpu}
+        
+        if not greedy_jobs:
+            # No eligible victims
+            return (None, None)
+        
+        # Now `greedy_jobs` has all eligible victims. Sort them by LRP.
+        victim_list = list(greedy_jobs.values())
+        victim_list.sort(key=lambda item: item['job'].last_preemption_time)
+        
+        # Get the best victim job and one of its GPUs
+        best_victim = victim_list[0]
+        
+        # Return the job and *one* of its GPUs to be preempted
+        return (best_victim['job'], best_victim['gpu'])
 
     def release_resources_for_job(self, job):
         for gpu in job.assigned_gpus:
