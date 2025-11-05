@@ -124,9 +124,15 @@ class ClusterManager:
         for gpu in self.inference_gpus:
             if gpu.sharable:
                 for job in gpu.get_running_training_jobs():
-                    # NEW: Only consider this job a victim if it's not in its cooldown period.
-                    if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN or current_time == job.last_preemption_time:
-                        potential_victims.append((job, gpu))
+                    
+                    # --- V3.1 BUG FIX: START ---
+                    # Protect jobs from being preempted below their minimum.
+                    if len(job.assigned_gpus) > job.gpus_needed:
+                    # --- V3.1 BUG FIX: END ---
+                    
+                        # Only consider this job a victim if it's not in its cooldown period.
+                        if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN or current_time == job.last_preemption_time:
+                            potential_victims.append((job, gpu))
                     
         # 2. If no victims exist, return None.
         if not potential_victims:
