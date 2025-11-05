@@ -449,17 +449,25 @@ class Scheduler:
                          f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{job.gpus_needed}\n")
             self.training_log_file.write(log_entry)
 
-        if job.job_type == 'inference' or job.job_type == 'llm_inference':
+        if job.job_type == 'inference' or job.job_type == 'llm_inference' or job.job_type == 'training':
+            # --- V2 MODIFICATION: This logic is generic and now also handles
+            # reclamation within the training pool. ---
             for gpu in freed_gpus:
                 if gpu.gpu_id in self.preemption_map:
-                    # ** This existing logic will now correctly handle LLM jobs **
                     if gpu.is_idle():
-                        reclaiming_job = self.preemption_map[gpu.gpu_id]
+                        # Find the job that was preempted from this GPU
+                        reclaiming_job = self.preemption_map.pop(gpu.gpu_id)
+                        
+                        # Give the GPU back to the job if it's still running
                         if reclaiming_job in self.running_jobs:
                             reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
                             self.reclamation_count += 1
-                            print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu.gpu_id} for training job {reclaiming_job.id}.")
-                        del self.preemption_map[gpu.gpu_id]
+                            # print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu.gpu_id} for training job {reclaiming_job.id}.")
+                        # else:
+                        #   The preempted job already finished, so this GPU just stays idle.
+                    # else:
+                    #   The GPU is not idle (e.g., scale-down policy grabbed it).
+                    #   The preemption_map entry remains, waiting for it to be free.
     
     def run_simulation(self):
         """Main simulation loop with adaptive policies and fair dispatching."""
