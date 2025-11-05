@@ -79,6 +79,7 @@ class Scheduler:
 
                 if has_native_task:
                     inference_gpus_used += 1
+                # --- V3 MODIFICATION: Log borrowed GPUs ---
                 if has_borrowed_task:
                     borrowed_gpus_used += 1
             
@@ -93,7 +94,7 @@ class Scheduler:
         when scaling down.
         """
         
-        print(f"--- ⚙️ Clock {self.clock.current_time}: Running adaptive LLM policy ---")
+        # print(f"--- ⚙️ Clock {self.clock.current_time}: Running adaptive LLM policy ---")
         
         # 1. Measure current LLM job load (running + waiting to be retried)
         llm_jobs_count = 0
@@ -109,7 +110,7 @@ class Scheduler:
         target_llm_gpus = math.ceil(llm_jobs_count / LLM_MAX_CONCURRENCY) + 1
 
         # --- ADD THIS LINE FOR DEBUGGING ---
-        print(f"    Policy Check: Found {llm_jobs_count} active LLM jobs. Target servers: {target_llm_gpus}")
+        # print(f"    Policy Check: Found {llm_jobs_count} active LLM jobs. Target servers: {target_llm_gpus}")
 
         # 3. Get the current state of the cluster
         current_llm_gpus = [gpu for gpu in self.cluster.inference_gpus if gpu.is_llm_server]
@@ -117,11 +118,11 @@ class Scheduler:
         # 4. Scale up or down to meet the target
         gpus_to_change = target_llm_gpus - len(current_llm_gpus)
         
-        ratio = abs(gpus_to_change / len(current_llm_gpus))
+        ratio = abs(gpus_to_change / len(current_llm_gpus)) if len(current_llm_gpus) > 0 else 1.0
 
         if gpus_to_change > 0 and ratio >= 0.1: # --- Scale UP (NEW PRIORITY) ---
         
-            print(f"    Policy: Scaling UP by {gpus_to_change} servers.")
+            # print(f"    Policy: Scaling UP by {gpus_to_change} servers.")
             num_converted = 0
 
             # Step A: Find and convert idle NON-SHARABLE GPUs
@@ -135,23 +136,26 @@ class Scheduler:
             # Step B: If still not enough, preempt training jobs from SHARABLE GPUs
             gpus_still_needed = gpus_to_change - num_converted
             if gpus_still_needed > 0:
-                print(f"    Policy: Preempting {gpus_still_needed} training jobs to create more servers.")
+                # print(f"    Policy: Preempting {gpus_still_needed} training jobs to create more servers.")
                 for _ in range(gpus_still_needed):
+                    # --- V3 NOTE: This preemption is for *inference jobs* ---
+                    # It finds training jobs borrowed from the inference pool
                     victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
                     if victim_job and victim_gpu:
                         victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+                        # We track this for reclamation
                         self.preemption_map[victim_gpu.gpu_id] = victim_job
                         self.preemption_count += 1
                         victim_gpu.convert_to_llm_server()
                         num_converted += 1
                     else:
-                        print("    Policy: No more victims to preempt.")
+                        # print("    Policy: No more victims to preempt.")
                         break # No more victims
 
             # Step C: If STILL not enough, convert idle SHARABLE GPUs (last resort)
             gpus_still_needed = gpus_to_change - num_converted
             if gpus_still_needed > 0:
-                print(f"    Policy: Using {gpus_still_needed} idle sharable GPUs as last resort.")
+                # print(f"    Policy: Using {gpus_still_needed} idle sharable GPUs as last resort.")
                 candidates_sharable = [gpu for gpu in self.cluster.inference_gpus if not gpu.is_llm_server and gpu.is_idle() and gpu.sharable]
                 for gpu in candidates_sharable:
                     if num_converted >= gpus_to_change: break
@@ -160,7 +164,7 @@ class Scheduler:
 
         elif gpus_to_change < 0 and ratio >= 0.1: # --- Scale DOWN ---
             # (Scale-down logic is unchanged)
-            print(f"    Policy: Scaling DOWN by {abs(gpus_to_change)} servers.")
+            # print(f"    Policy: Scaling DOWN by {abs(gpus_to_change)} servers.")
             num_to_revert = abs(gpus_to_change)
             
             empty_servers = [gpu for gpu in current_llm_gpus if not gpu.running_tasks]
@@ -172,7 +176,7 @@ class Scheduler:
             all_candidates = empty_servers + busy_servers
             gpus_to_revert = all_candidates[:num_to_revert]
 
-            print(f"    Policy: Found {len(empty_servers)} empty servers and {len(busy_servers)} busy servers. Reverting {len(gpus_to_revert)}.")
+            # print(f"    Policy: Found {len(empty_servers)} empty servers and {len(busy_servers)} busy servers. Reverting {len(gpus_to_revert)}.")
 
             for gpu_to_revert in gpus_to_revert:
                 if gpu_to_revert.running_tasks:
@@ -184,6 +188,7 @@ class Scheduler:
                         self.jobs_to_retry.append(job) 
                         gpu_to_revert.release_task(job) 
                 
+                # --- V3 NOTE: This reclamation handles both pool types ---
                 if gpu_to_revert.gpu_id in self.preemption_map:
                     reclaiming_job = self.preemption_map.pop(gpu_to_revert.gpu_id)
                     reverted = gpu_to_revert.revert_from_llm_server()
@@ -276,6 +281,7 @@ class Scheduler:
         
         # 2. If no GPU is readily available, try to free one up via preemption.
         if not gpu:
+            # --- V3 NOTE: This finds a *borrowed* training job to preempt ---
             victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
             if victim_job and victim_gpu:
                 # Preempting the training job makes its GPU idle and thus convertible.
@@ -320,6 +326,7 @@ class Scheduler:
             return True
 
         # If no space, try to preempt a training job
+        # --- V3 NOTE: This finds a *borrowed* training job to preempt ---
         victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
         if victim_job and victim_gpu:
             victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
@@ -346,6 +353,7 @@ class Scheduler:
         if gpus_still_needed > 0:
             preempted_gpus = []
             for _ in range(gpus_still_needed):
+                # --- V3 NOTE: This finds a *borrowed* training job to preempt ---
                 victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
                 # Ensure we don't try to preempt from a GPU we just allocated as idle
                 if victim_job and victim_gpu and victim_gpu not in allocated_gpus:
@@ -368,39 +376,88 @@ class Scheduler:
             return True
         return False
         
+    # --- V3 MODIFICATION: START ---
+    
     def _dispatch_training_job(self, job):
-        """Schedules a training job, requiring it to fit entirely in the training pool."""
+        """
+        Schedules a training job using the V3 policy:
+        1. Get minimum GPUs from the training pool.
+        2. Preempt other *training jobs* (if needed) to meet the minimum.
+        3. Greedily take extra GPUs (up to 2x cap) from:
+           a. The training pool (idle)
+           b. The inference pool (idle, sharable)
+        4. Reclamation is enabled for all preemptions.
+        """
+        # 1. Calculate min/max
         gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
                           math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
         job.gpus_needed = gpus_needed
+        max_gpus_allowed = gpus_needed * 2
 
-        # ** MODIFIED: A training job's base requirement must be met *only* from the training pool. **
-        allocated_gpus = self.cluster.find_idle_gpus_for_training(gpus_needed)
+        # 2. Get all currently idle training GPUs
+        allocated_gpus = self.cluster.find_all_idle_gpus_in_training_pool()
         
-        # If the base requirement is met by the training pool, proceed to schedule.
-        if len(allocated_gpus) == gpus_needed:
-            # Check if this job is eligible for greedy speedup from the inference pool.
-            mem_slice_per_gpu = job.memory_required / gpus_needed
+        gpus_still_needed_for_min = gpus_needed - len(allocated_gpus)
+
+        # 3. Preempt from training pool if min not met
+        if gpus_still_needed_for_min > 0:
+            preempted_training_gpus = []
+            for _ in range(gpus_still_needed_for_min):
+                # Find a 'greedy' job in the training pool
+                victim_job, victim_gpu = self.cluster.find_preemptible_job_in_training_pool(self.clock.current_time)
+                
+                if victim_job and victim_gpu:
+                    victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+                    # --- V3 NOTE: Track for reclamation ---
+                    self.preemption_map[victim_gpu.gpu_id] = victim_job
+                    self.preemption_count += 1
+                    preempted_training_gpus.append(victim_gpu)
+                else:
+                    # No (more) eligible victims found. This job must wait.
+                    # Rollback any preemptions made in this failed attempt
+                    for gpu in preempted_training_gpus:
+                         reclaiming_job = self.preemption_map.pop(gpu.gpu_id)
+                         if reclaiming_job in self.running_jobs:
+                            reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
+                         self.preemption_count -= 1
+                    return False # Job fails to schedule
+            
+            allocated_gpus.extend(preempted_training_gpus)
+
+        # 4. If we are here, min is met. `allocated_gpus` has all available training GPUs.
+        #    Now, try to borrow from the inference pool to reach the cap.
+        
+        gpus_still_wanted = max_gpus_allowed - len(allocated_gpus)
+        
+        if gpus_still_wanted > 0:
+            # Check eligibility (V1 logic)
+            mem_slice_per_gpu = job.memory_required / gpus_needed if gpus_needed > 0 else job.memory_required
             effective_gpu_mem = GPU_MEMORY_GB - SHARABLE_GPU_MEM_PENALTY_GB
             is_high_memory_job = mem_slice_per_gpu > effective_gpu_mem
 
             if not is_high_memory_job:
-                extra_gpus_to_request = math.ceil(gpus_needed * 1)
-                if extra_gpus_to_request > 0:
-                    # The inference pool is now only used for these extra GPUs.
-                    extra_gpus = self.cluster.find_idle_borrowable_gpus(extra_gpus_to_request)
-                    if extra_gpus: 
-                        allocated_gpus.extend(extra_gpus)
-            
-            job.assign_resources(allocated_gpus, self.clock.current_time)
-            self.running_jobs.append(job)
-            return True
-            
-        # If the training pool did not have enough GPUs, the job cannot be scheduled and must wait.
-        return False
+                # Try to get extra GPUs from inference pool
+                extra_gpus = self.cluster.find_idle_borrowable_gpus(gpus_still_wanted)
+                if extra_gpus: 
+                    allocated_gpus.extend(extra_gpus)
+        
+        # 5. Apply the *final* cap to all collected GPUs (training + inference)
+        #    This is in case `allocated_gpus` (from training) was already > max_gpus_allowed
+        num_gpus_to_assign = min(len(allocated_gpus), max_gpus_allowed)
+        gpus_to_assign = allocated_gpus[:num_gpus_to_assign]
+        
+        # 6. Assign resources
+        job.assign_resources(gpus_to_assign, self.clock.current_time)
+        self.running_jobs.append(job)
+        return True
+    
+    # --- V3 MODIFICATION: END ---
          
     def _handle_job_completion(self, job):
-        """Processes a finished job, logs training data, and handles reclamation."""
+        """
+        Processes a finished job, logs training data, and handles reclamation.
+        V3: This logic handles reclamation for *both* training and inference pools.
+        """
         freed_gpus = list(job.assigned_gpus)
         self.cluster.release_resources_for_job(job)
         job.record_completion(self.clock.current_time)
@@ -415,17 +472,19 @@ class Scheduler:
                          f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{job.gpus_needed}\n")
             self.training_log_file.write(log_entry)
 
-        if job.job_type == 'inference' or job.job_type == 'llm_inference':
-            for gpu in freed_gpus:
-                if gpu.gpu_id in self.preemption_map:
-                    # ** This existing logic will now correctly handle LLM jobs **
-                    if gpu.is_idle():
-                        reclaiming_job = self.preemption_map[gpu.gpu_id]
-                        if reclaiming_job in self.running_jobs:
-                            reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
-                            self.reclamation_count += 1
-                            print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu.gpu_id} for training job {reclaiming_job.id}.")
-                        del self.preemption_map[gpu.gpu_id]
+        # --- V3 NOTE: This reclamation logic is generic and works for all job types
+        # and all preemptions tracked in the map.
+        for gpu in freed_gpus:
+            if gpu.gpu_id in self.preemption_map:
+                if gpu.is_idle():
+                    # Find the job that was preempted from this GPU
+                    reclaiming_job = self.preemption_map.pop(gpu.gpu_id)
+                    
+                    # Give the GPU back to the job if it's still running
+                    if reclaiming_job in self.running_jobs:
+                        reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
+                        self.reclamation_count += 1
+                        # print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu.gpu_id} for training job {reclaiming_job.id}.")
     
     def run_simulation(self):
         """Main simulation loop with adaptive policies and fair dispatching."""
@@ -493,7 +552,7 @@ class Scheduler:
             # 1. Combine jobs to be attempted this tick, prioritizing retries.
             arrived_jobs = list(self.jobs_to_retry)
             self.jobs_to_retry.clear()
-            while self.pending_jobs and self.pending_jobs[0].arrival_time <= self.clock.current_time:
+            while self.pending_jobs and self.pending_jobs[0]. arrival_time <= self.clock.current_time:
                 arrived_jobs.append(self.pending_jobs.popleft())
 
             if arrived_jobs:
@@ -542,19 +601,26 @@ class Scheduler:
 
             training_jobs = [j for j in self.completed_jobs if j.job_type == 'training']
             inference_jobs = [j for j in self.completed_jobs if j.job_type == 'inference']
+            # --- V2 MODIFICATION: Also include LLM jobs in inference stats ---
+            llm_jobs = [j for j in self.completed_jobs if j.job_type == 'llm_inference']
+            all_inference_jobs = inference_jobs + llm_jobs
+            
             avg_training_turnaround = sum(j.turnaround_time for j in training_jobs) / len(training_jobs) if training_jobs else 0
-            avg_inference_turnaround = sum(j.turnaround_time for j in inference_jobs) / len(inference_jobs) if inference_jobs else 0
+            avg_inference_turnaround = sum(j.turnaround_time for j in all_inference_jobs) / len(all_inference_jobs) if all_inference_jobs else 0
             
             # Build the output lines
             lines = [
                 "--- Simulation Results ---",
                 f"Detailed logs saved to 'training_job_log.csv' and 'gpu_usage_log.csv'",
                 f"Total Jobs Completed: {total_jobs}",
+                f"  Training: {len(training_jobs)}",
+                f"  Inference (Reg): {len(inference_jobs)}",
+                f"  Inference (LLM): {len(llm_jobs)}",
                 f"Total Preemptions: {self.preemption_count}",
                 f"Total Successful Reclamations: {self.reclamation_count}",
-                f"Peak number of sharable GPUs locked by policy: {self.max_locked_gpus}",
+                f"Peak number of sharable GPUs locked by policy: {self.max_locked_gpus}", # This will be 0 for this policy
                 f"Average Training Job Turnaround: {avg_training_turnaround:.2f} seconds",
-                f"Average Inference Job Turnaround: {avg_inference_turnaround:.2f} seconds",
+                f"Average Inference Job (All) Turnaround: {avg_inference_turnaround:.2f} seconds",
                 "--------------------------"
             ]
 
