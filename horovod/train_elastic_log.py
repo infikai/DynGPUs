@@ -86,7 +86,7 @@ def train(state):
     if hvd.rank() == 1:
         logging.basicConfig(filename='worker_adjustments.log',
                             level=logging.INFO,
-                            format='%(asctime)s - %(message)s',
+                            format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S')
         logging.info("Training run.")
     # Log when train() is called, which happens initially and after a host update
