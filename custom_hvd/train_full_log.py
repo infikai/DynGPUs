@@ -67,6 +67,7 @@ def main():
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]))
+    sampler = MyElasticSampler(train_dataset)
 
     state = TrainingState()
     current_active_ranks = []
@@ -149,7 +150,7 @@ def main():
                         hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters(), process_set=active_set)
 
                     local_rank = current_active_ranks.index(hvd.rank())
-                    sampler = MyElasticSampler(train_dataset)
+                    
                     sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
                     data_iterator = iter(loader)
