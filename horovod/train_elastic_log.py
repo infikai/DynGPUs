@@ -102,12 +102,14 @@ def train(state):
 
     batch_offset = state.batch
     print(f'Epoch: {epoch}; Batch offset:{batch_offset}')
+    ST_sampler = time.time()
+    state.train_sampler.load_state_dict({'epoch': epoch, 'processed_num': state.processed_num})
+    print(f'Sampler load Cost: {time.time() - ST_sampler}s')
     start_init_loop = time.time()
     for idx, (data, target) in enumerate(train_loader):
         # Time-based logging every 10 seconds on rank 0
         if hvd.rank() == 1 and time.time() - last_log_time > 3:
             epoch = state.epoch
-            processed_num = state.train_sampler.state_dict()['processed_num']
             logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed}')
             last_log_time = time.time()  # Reset the timer
 
@@ -190,6 +192,7 @@ def train(state):
         # so we do not reprocess them if a reset event occurs
         # print(allreduce_batch_size)
         state.train_sampler.record_batch(idx, allreduce_batch_size)
+        state.processed_num = train_sampler.state_dict()['processed_num']
         processed += allreduce_batch_size * hvd.size()
         print(allreduce_batch_size * hvd.size())
 
@@ -453,7 +456,8 @@ if __name__ == '__main__':
                                    train_sampler=train_sampler,
                                    val_sampler=val_sampler,
                                    epoch=resume_from_epoch,
-                                   batch=0)
+                                   batch=0,
+                                   processed_num=0)
     print(f"took: {time.time() - start_state}s")
     end_main = time.time()
     print(f'Main function took: {end_main - start_main}s')
