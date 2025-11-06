@@ -150,9 +150,10 @@ def main():
                         hvd_optimizer = hvd.DistributedOptimizer(base_optimizer, named_parameters=model.named_parameters(), process_set=active_set)
 
                     local_rank = current_active_ranks.index(hvd.rank())
-                    
+                    ST_data = time.time()
                     sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
                     loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
+                    print(f'Data Cost: {time.time() - ST_data}s')
                     data_iterator = iter(loader)
 
                 config_change_duration = time.time() - ST_config
