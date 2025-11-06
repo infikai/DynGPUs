@@ -380,74 +380,92 @@ class Scheduler:
     
     def _dispatch_training_job(self, job):
         """
-        Schedules a training job using the V3 policy:
-        1. Get minimum GPUs from the training pool.
-        2. Preempt other *training jobs* (if needed) to meet the minimum.
-        3. Greedily take extra GPUs (up to 2x cap) from:
-           a. The training pool (idle)
-           b. The inference pool (idle, sharable)
+        Schedules a training job using the V3.1 "Split-Greedy" policy:
+        1. Get minimum GPUs from the training pool, preempting if necessary.
+        2. Calculate extra GPUs allowed (up to 2x cap).
+        3. Split the "extra" request:
+           a. Try to get ~50% from the remaining training pool.
+           b. Try to get ~50% from the idle, sharable inference pool.
         4. Reclamation is enabled for all preemptions.
         """
         # 1. Calculate min/max
         gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
                           math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
         job.gpus_needed = gpus_needed
-        max_gpus_allowed = gpus_needed * 3
+        max_gpus_allowed = math.ceil(gpus_needed * 2.5)
 
-        # 2. Get all currently idle training GPUs
-        allocated_gpus = self.cluster.find_all_idle_gpus_in_training_pool()
+        # 2. Get *all* idle training GPUs first
+        idle_training_gpus = self.cluster.find_all_idle_gpus_in_training_pool()
         
-        gpus_still_needed_for_min = gpus_needed - len(allocated_gpus)
-
-        # 3. Preempt from training pool if min not met
-        if gpus_still_needed_for_min > 0:
+        # 3. Secure the *minimum* requirement
+        
+        # GPUs we will definitely assign
+        allocated_gpus = [] 
+        # Idle GPUs that remain after we take our minimum
+        remaining_idle_training_gpus = [] 
+        
+        if len(idle_training_gpus) >= gpus_needed:
+            # We have enough idle. Take what we need.
+            allocated_gpus = idle_training_gpus[:gpus_needed]
+            remaining_idle_training_gpus = idle_training_gpus[gpus_needed:]
+        else:
+            # Not enough idle. Take all of them, then preempt for the rest.
+            allocated_gpus = idle_training_gpus
+            gpus_still_needed_for_min = gpus_needed - len(allocated_gpus)
+            
             preempted_training_gpus = []
             for _ in range(gpus_still_needed_for_min):
-                # Find a 'greedy' job in the training pool
                 victim_job, victim_gpu = self.cluster.find_preemptible_job_in_training_pool(self.clock.current_time)
                 
                 if victim_job and victim_gpu:
                     victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
-                    # --- V3 NOTE: Track for reclamation ---
                     self.preemption_map[victim_gpu.gpu_id] = victim_job
                     self.preemption_count += 1
                     preempted_training_gpus.append(victim_gpu)
                 else:
-                    # No (more) eligible victims found. This job must wait.
-                    # Rollback any preemptions made in this failed attempt
+                    # Failed to get minimum. Rollback and return.
                     for gpu in preempted_training_gpus:
                          reclaiming_job = self.preemption_map.pop(gpu.gpu_id)
                          if reclaiming_job in self.running_jobs:
                             reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
                          self.preemption_count -= 1
+                    # Also must return the idle GPUs we temporarily held
+                    # (This is handled by just returning False, they were never assigned)
                     return False # Job fails to schedule
             
             allocated_gpus.extend(preempted_training_gpus)
+            # In this case, there are no 'remaining' idle training GPUs.
+            remaining_idle_training_gpus = []
 
-        # 4. If we are here, min is met. `allocated_gpus` has all available training GPUs.
-        #    Now, try to borrow from the inference pool to reach the cap.
+        # 4. If we are here, `allocated_gpus` has exactly `gpus_needed`.
+        #    Now, get extras from both pools.
         
-        gpus_still_wanted = max_gpus_allowed - len(allocated_gpus)
+        extra_gpus_allowed = max_gpus_allowed - len(allocated_gpus) # Should be `gpus_needed`
         
-        if gpus_still_wanted > 0:
-            # Check eligibility (V1 logic)
-            mem_slice_per_gpu = job.memory_required / gpus_needed if gpus_needed > 0 else job.memory_required
-            effective_gpu_mem = GPU_MEMORY_GB - SHARABLE_GPU_MEM_PENALTY_GB
-            is_high_memory_job = mem_slice_per_gpu > effective_gpu_mem
+        if extra_gpus_allowed > 0:
+            
+            # --- Split the request ---
+            extra_from_training_pool = math.ceil(extra_gpus_allowed / 2)
+            extra_from_inference_pool = extra_gpus_allowed // 2
 
-            if not is_high_memory_job:
-                # Try to get extra GPUs from inference pool
-                extra_gpus = self.cluster.find_idle_borrowable_gpus(gpus_still_wanted)
-                if extra_gpus: 
-                    allocated_gpus.extend(extra_gpus)
+            # a. Get from remaining training pool
+            gpus_from_training = remaining_idle_training_gpus[:extra_from_training_pool]
+            allocated_gpus.extend(gpus_from_training)
+
+            # b. Get from inference pool
+            if extra_from_inference_pool > 0:
+                # Check eligibility (V1 logic)
+                mem_slice_per_gpu = job.memory_required / gpus_needed
+                effective_gpu_mem = GPU_MEMORY_GB - SHARABLE_GPU_MEM_PENALTY_GB
+                is_high_memory_job = mem_slice_per_gpu > effective_gpu_mem
+
+                if not is_high_memory_job:
+                    gpus_from_inference = self.cluster.find_idle_borrowable_gpus(extra_from_inference_pool)
+                    allocated_gpus.extend(gpus_from_inference)
         
-        # 5. Apply the *final* cap to all collected GPUs (training + inference)
-        #    This is in case `allocated_gpus` (from training) was already > max_gpus_allowed
-        num_gpus_to_assign = min(len(allocated_gpus), max_gpus_allowed)
-        gpus_to_assign = allocated_gpus[:num_gpus_to_assign]
-        
-        # 6. Assign resources
-        job.assign_resources(gpus_to_assign, self.clock.current_time)
+        # 5. Assign resources
+        #    `allocated_gpus` now has the minimum + extras from both pools
+        job.assign_resources(allocated_gpus, self.clock.current_time)
         self.running_jobs.append(job)
         return True
     
