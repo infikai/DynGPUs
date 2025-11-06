@@ -285,7 +285,7 @@ def end_epoch(state):
     state.epoch += 1
     state.batch = 0
     state.train_sampler.set_epoch(state.epoch)
-    processed = 0
+    state.processed_num = 0
     # state.commit()
 
 
