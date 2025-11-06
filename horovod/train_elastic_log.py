@@ -186,7 +186,7 @@ def train(state):
                 logging.info("Backward pass.")
             #     print(f'Time: {time.time() - int_train}s')
         
-        print(f'Local train time: {end_train - start_train}s')
+        # print(f'Local train time: {end_train - start_train}s')
 
         # Elastic Horovod: record which samples were processed this batch
         # so we do not reprocess them if a reset event occurs
