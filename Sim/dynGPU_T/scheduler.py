@@ -392,7 +392,7 @@ class Scheduler:
         gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
                           math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
         job.gpus_needed = gpus_needed
-        max_gpus_allowed = gpus_needed * 2
+        max_gpus_allowed = gpus_needed * 3
 
         # 2. Get all currently idle training GPUs
         allocated_gpus = self.cluster.find_all_idle_gpus_in_training_pool()
