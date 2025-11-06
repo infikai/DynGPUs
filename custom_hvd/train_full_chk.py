@@ -95,11 +95,11 @@ def main():
                 if hvd.rank() == 0:
                     ST_chk = time.time()
                     filepath = './checkpoint.pth.tar'
-                    state = {
+                    chk_state = {
                         'model': model.state_dict(),
                         'optimizer': base_optimizer.state_dict(),
                     }
-                    torch.save(state, filepath)
+                    torch.save(chk_state, filepath)
 
                     checkpoint = torch.load(filepath)
                     model.load_state_dict(checkpoint['model'])
