@@ -91,7 +91,9 @@ def main():
                 fisrt_batch = True
                 sync = True
 
+                
                 if hvd.rank() == 0:
+                    ST_chk = time.time()
                     filepath = './checkpoint.pth.tar'
                     state = {
                         'model': model.state_dict(),
@@ -102,6 +104,7 @@ def main():
                     checkpoint = torch.load(filepath)
                     model.load_state_dict(checkpoint['model'])
                     base_optimizer.load_state_dict(checkpoint['optimizer'])
+                    print(f'Chk Cost: {time.time() - ST_chk}s')
 
 
                 if hvd.rank() == 0:
