@@ -194,7 +194,7 @@ def train(state):
         state.train_sampler.record_batch(idx, allreduce_batch_size)
         state.processed_num = train_sampler.state_dict()['processed_num']
         processed += allreduce_batch_size * hvd.size()
-        print(allreduce_batch_size * hvd.size())
+        # print(allreduce_batch_size * hvd.size())
 
         start_op = time.time()
         # Gradient is applied across all ranks
