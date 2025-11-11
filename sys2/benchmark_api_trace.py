@@ -4,7 +4,8 @@ import json
 import os
 import random
 import time
-from dataclasses import dataclass, field
+# --- MODIFIED: Added asdict ---
+from dataclasses import dataclass, field, asdict
 from typing import List
 
 import aiohttp
@@ -171,6 +172,37 @@ def calculate_metrics(
     print("="*50)
 
 
+# --- NEW FUNCTION ---
+def save_results_to_file(results: List[RequestResult], filename: str):
+    """Saves the detailed results list to a JSONL file."""
+    print(f"\nSaving detailed results for {len(results)} requests to {filename}...")
+    count = 0
+    with open(filename, "w") as f:
+        for result in results:
+            try:
+                # Convert the RequestResult dataclass to a dictionary
+                result_dict = asdict(result)
+                # Dump the dictionary as a JSON string
+                json_line = json.dumps(result_dict)
+                # Write the JSON string as a new line in the file
+                f.write(json_line + "\n")
+                count += 1
+            except Exception as e:
+                # Log a warning if a single result fails to serialize
+                print(f"Warning: Failed to serialize result for request {result.request_id}: {e}")
+    print(f"Successfully saved {count} individual request results.")
+
+def save_summary_to_file(summary_report: str, filename: str):
+    """Saves the summary report string to a text file."""
+    print(f"\nSaving summary report to {filename}...")
+    try:
+        with open(filename, "w") as f:
+            f.write(summary_report)
+        print("Summary report saved successfully.")
+    except IOError as e:
+        print(f"Error: Failed to write summary file {filename}: {e}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="A client for benchmarking vLLM API server with a trace file.")
     parser.add_argument("--host", type=str, default="localhost")
@@ -192,6 +224,21 @@ if __name__ == "__main__":
         type=int,
         default=42, # A default seed ensures it's reproducible by default
         help="Random seed for downsampling to ensure reproducibility."
+    )
+    
+    # --- NEW OUTPUT FILE ARGUMENT ---
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        default="./result.jsonl",
+        help="Path to a JSONL file to save detailed results for each request."
+    )
+
+    parser.add_argument(
+        "--summary-file",
+        type=str,
+        default="./summary.txt",
+        help="Path to a TXT file to save the final summary report."
     )
     
     args = parser.parse_args()
@@ -223,4 +270,16 @@ if __name__ == "__main__":
     end_time = time.perf_counter()
     
     actual_duration = end_time - start_time
-    calculate_metrics(requests, results, actual_duration)
+    
+    # --- NEW: Save results to file if an output file is specified ---
+    if args.output_file:
+        save_results_to_file(results, args.output_file)
+    
+    summary_report = calculate_metrics(requests, results, actual_duration)
+    
+    # Print summary to console
+    print(summary_report)
+    
+    # Save summary to file if specified
+    if args.summary_file:
+        save_summary_to_file(summary_report, args.summary_file)
