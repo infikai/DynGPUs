@@ -4,7 +4,8 @@ import json
 import os
 import random
 import time
-from dataclasses import dataclass, field
+# --- MODIFIED: Added asdict ---
+from dataclasses import dataclass, field, asdict
 from typing import List
 
 import aiohttp
@@ -130,18 +131,19 @@ def calculate_metrics(
     requests: List[Request],
     results: List[RequestResult],
     duration: float,
-):
-    """Calculates and prints performance metrics."""
+) -> str:
+    """Calculates performance metrics and returns a formatted summary string."""
+    lines = []
     completed_requests = sum(1 for r in results if r.success)
     total_output_tokens = sum(r.output_len for r in results if r.success)
 
-    print("\n" + "="*50)
-    print("=============== Benchmark Summary ================")
-    print("="*50)
-    print(f"Total time: {duration:.2f} s")
-    print(f"Total requests processed: {completed_requests} / {len(results)}")
-    print(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
-    print(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
+    lines.append("\n" + "="*50)
+    lines.append("=============== Benchmark Summary ================")
+    lines.append("="*50)
+    lines.append(f"Total time: {duration:.2f} s")
+    lines.append(f"Total requests processed: {completed_requests} / {len(results)}")
+    lines.append(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
+    lines.append(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
 
     ttfts, tpots, itls = [], [], []
     for res in results:
@@ -155,20 +157,46 @@ def calculate_metrics(
             inter_token_latencies = np.diff(res.token_timestamps)
             itls.extend(inter_token_latencies.tolist())
 
-    def print_latency_stats(name, latencies_sec):
-        if not latencies_sec: return
-        latencies_ms = np.array(latencies_sec) * 1000
-        print(f"Mean {name} (ms):   {np.mean(latencies_ms):.2f}")
-        print(f"Median {name} (ms): {np.median(latencies_ms):.2f}")
-        print(f"P99 {name} (ms):    {np.percentile(latencies_ms, 99):.2f}")
+    lines.append("\n" + "-"*15 + "Time to First Token" + "-"*15)
+    print_latency_stats("TTFT", ttfts, lines)
+    lines.append("\n" + "-----Time per Output Token (excl. 1st token)------")
+    print_latency_stats("TPOT", tpots, lines)
+    lines.append("\n" + "-"*15 + "Inter-token Latency" + "-"*15)
+    print_latency_stats("ITL", itls, lines)
+    lines.append("="*50)
+    
+    return "\n".join(lines)
 
-    print("\n" + "-"*15 + "Time to First Token" + "-"*15)
-    print_latency_stats("TTFT", ttfts)
-    print("\n" + "-----Time per Output Token (excl. 1st token)------")
-    print_latency_stats("TPOT", tpots)
-    print("\n" + "-"*15 + "Inter-token Latency" + "-"*15)
-    print_latency_stats("ITL", itls)
-    print("="*50)
+
+# --- NEW FUNCTION ---
+def save_results_to_file(results: List[RequestResult], filename: str):
+    """Saves the detailed results list to a JSONL file."""
+    print(f"\nSaving detailed results for {len(results)} requests to {filename}...")
+    count = 0
+    with open(filename, "w") as f:
+        for result in results:
+            try:
+                # Convert the RequestResult dataclass to a dictionary
+                result_dict = asdict(result)
+                # Dump the dictionary as a JSON string
+                json_line = json.dumps(result_dict)
+                # Write the JSON string as a new line in the file
+                f.write(json_line + "\n")
+                count += 1
+            except Exception as e:
+                # Log a warning if a single result fails to serialize
+                print(f"Warning: Failed to serialize result for request {result.request_id}: {e}")
+    print(f"Successfully saved {count} individual request results.")
+
+def save_summary_to_file(summary_report: str, filename: str):
+    """Saves the summary report string to a text file."""
+    print(f"\nSaving summary report to {filename}...")
+    try:
+        with open(filename, "w") as f:
+            f.write(summary_report)
+        print("Summary report saved successfully.")
+    except IOError as e:
+        print(f"Error: Failed to write summary file {filename}: {e}")
 
 
 if __name__ == "__main__":
@@ -192,6 +220,21 @@ if __name__ == "__main__":
         type=int,
         default=42, # A default seed ensures it's reproducible by default
         help="Random seed for downsampling to ensure reproducibility."
+    )
+    
+    # --- NEW OUTPUT FILE ARGUMENT ---
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        default="./result.jsonl",
+        help="Path to a JSONL file to save detailed results for each request."
+    )
+
+    parser.add_argument(
+        "--summary-file",
+        type=str,
+        default="./summary.txt",
+        help="Path to a TXT file to save the final summary report."
     )
     
     args = parser.parse_args()
@@ -223,4 +266,16 @@ if __name__ == "__main__":
     end_time = time.perf_counter()
     
     actual_duration = end_time - start_time
-    calculate_metrics(requests, results, actual_duration)
+    
+    # --- NEW: Save results to file if an output file is specified ---
+    if args.output_file:
+        save_results_to_file(results, args.output_file)
+    
+    summary_report = calculate_metrics(requests, results, actual_duration)
+    
+    # Print summary to console
+    print(summary_report)
+    
+    # Save summary to file if specified
+    if args.summary_file:
+        save_summary_to_file(summary_report, args.summary_file)

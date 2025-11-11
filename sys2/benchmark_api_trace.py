@@ -131,18 +131,19 @@ def calculate_metrics(
     requests: List[Request],
     results: List[RequestResult],
     duration: float,
-):
-    """Calculates and prints performance metrics."""
+) -> str:
+    """Calculates performance metrics and returns a formatted summary string."""
+    lines = []
     completed_requests = sum(1 for r in results if r.success)
     total_output_tokens = sum(r.output_len for r in results if r.success)
 
-    print("\n" + "="*50)
-    print("=============== Benchmark Summary ================")
-    print("="*50)
-    print(f"Total time: {duration:.2f} s")
-    print(f"Total requests processed: {completed_requests} / {len(results)}")
-    print(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
-    print(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
+    lines.append("\n" + "="*50)
+    lines.append("=============== Benchmark Summary ================")
+    lines.append("="*50)
+    lines.append(f"Total time: {duration:.2f} s")
+    lines.append(f"Total requests processed: {completed_requests} / {len(results)}")
+    lines.append(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
+    lines.append(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
 
     ttfts, tpots, itls = [], [], []
     for res in results:
@@ -156,20 +157,15 @@ def calculate_metrics(
             inter_token_latencies = np.diff(res.token_timestamps)
             itls.extend(inter_token_latencies.tolist())
 
-    def print_latency_stats(name, latencies_sec):
-        if not latencies_sec: return
-        latencies_ms = np.array(latencies_sec) * 1000
-        print(f"Mean {name} (ms):   {np.mean(latencies_ms):.2f}")
-        print(f"Median {name} (ms): {np.median(latencies_ms):.2f}")
-        print(f"P99 {name} (ms):    {np.percentile(latencies_ms, 99):.2f}")
-
-    print("\n" + "-"*15 + "Time to First Token" + "-"*15)
-    print_latency_stats("TTFT", ttfts)
-    print("\n" + "-----Time per Output Token (excl. 1st token)------")
-    print_latency_stats("TPOT", tpots)
-    print("\n" + "-"*15 + "Inter-token Latency" + "-"*15)
-    print_latency_stats("ITL", itls)
-    print("="*50)
+    lines.append("\n" + "-"*15 + "Time to First Token" + "-"*15)
+    print_latency_stats("TTFT", ttfts, lines)
+    lines.append("\n" + "-----Time per Output Token (excl. 1st token)------")
+    print_latency_stats("TPOT", tpots, lines)
+    lines.append("\n" + "-"*15 + "Inter-token Latency" + "-"*15)
+    print_latency_stats("ITL", itls, lines)
+    lines.append("="*50)
+    
+    return "\n".join(lines)
 
 
 # --- NEW FUNCTION ---
