@@ -83,6 +83,11 @@ def train(state):
     global last_log_time
     global processed
     # Configure logging to a file, only for the master worker (rank 0)
+    if hvd.rank() == 0:
+        logging.basicConfig(filename='throughput.log',
+                            level=logging.INFO,
+                            format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
     if hvd.rank() == 1:
         logging.basicConfig(filename='worker_adjustments.log',
                             level=logging.INFO,
@@ -193,7 +198,8 @@ def train(state):
         # print(allreduce_batch_size)
         state.train_sampler.record_batch(idx, allreduce_batch_size)
         state.processed_num = train_sampler.state_dict()['processed_num']
-        processed += allreduce_batch_size * hvd.size()
+        images = allreduce_batch_size * hvd.size()
+        processed += images
         # print(allreduce_batch_size * hvd.size())
 
         start_op = time.time()
@@ -206,11 +212,14 @@ def train(state):
         if hvd.rank() == 1 and idx == 0:
             logging.info("First Batch done!.")
         
-        if hvd.rank() == 1:
+        if hvd.rank() == 0:
             if idx % 1 == 0:
                 print(f'Epoch: [{epoch + 1}][{idx}/{len(train_loader)}]\t'
                           f'Loss {loss.item():.4f}\t')
                 print(f'Batch time: {end_batch - start_batch}s; OP step time: {end_batch - start_op}s')
+        throughput = images / (end_batch - start_batch)
+        if hvd.rank() == 0:
+            logging.info(f'Throughput: {throughput} images/second.')
 
 
     # if log_writer:

@@ -42,6 +42,12 @@ def main():
                             datefmt='%Y-%m-%d %H:%M:%S')
         logging.info("Starting training run.")
 
+    if hvd.rank() == 1:
+        logging.basicConfig(filename='throughput.log',
+                            level=logging.INFO,
+                            format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
+
     hostname = socket.gethostname()
     parts = hostname.split('.')
     nodename = parts[0]
@@ -86,6 +92,8 @@ def main():
 
         while True:
             if config_changed:
+                if hvd.rank() == 1:
+                        logging.info(f'Throughput: 0 images/second.')
                 print("Config changing")
                 ST_config = time.time()
                 fisrt_batch = True
@@ -164,6 +172,8 @@ def main():
                     logging.info(f"Configuration change took {config_change_duration:.4f} seconds. Sync required: {sync}")
 
                 config_changed = False
+                if hvd.rank() == 1:
+                        logging.info(f'Throughput: 0 images/second.')
 
             if hvd.rank() == 0:
                 new_ranks = read_active_ranks_from_file()
@@ -195,7 +205,8 @@ def main():
                     hvd_optimizer.step()
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
                     sampler.record_batch(state.batch_idx, args.batch_size)
-                    processed += args.batch_size * len(current_active_ranks)
+                    images = args.batch_size * len(current_active_ranks)
+                    processed += images
                     state.batch_idx += 1
                     state.processed_num = sampler.get_processed_num()
                     if hvd.rank() == current_active_ranks[0]:
@@ -204,12 +215,16 @@ def main():
                     if hvd.rank() == 0 and fisrt_batch == True:
                             logging.info(f"First Batch Cost: {time.time() - ST_batch}s")
                     fisrt_batch = False
+                    END_batch = time.time()
 
                     # MODIFICATION: Periodic progress logging
                     current_time = time.time()
                     if hvd.rank() == 0 and (current_time - last_log_time) >= 3:
                         logging.info(f"Progress - Epoch: {state.epoch}, Processed: {processed}")
                         last_log_time = current_time
+                    throughput = images / (END_batch - ST_batch)
+                    if hvd.rank() == 1:
+                        logging.info(f'Throughput: {throughput} images/second.')
 
                 except StopIteration:
                     epoch_finished = 1
