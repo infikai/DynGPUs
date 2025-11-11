@@ -126,6 +126,15 @@ async def benchmark(
         results = await asyncio.gather(*tasks)
         return results
 
+def print_latency_stats(name, latencies_sec, lines_list: List[str]):
+    """Helper function to format latency stats and append to a list."""
+    if not latencies_sec:
+        lines_list.append(f"  (No data for {name})")
+        return
+    latencies_ms = np.array(latencies_sec) * 1000
+    lines_list.append(f"  Mean {name} (ms):   {np.mean(latencies_ms):.2f}")
+    lines_list.append(f"  Median {name} (ms): {np.median(latencies_ms):.2f}")
+    lines_list.append(f"  P99 {name} (ms):    {np.percentile(latencies_ms, 99):.2f}")
 
 def calculate_metrics(
     requests: List[Request],
