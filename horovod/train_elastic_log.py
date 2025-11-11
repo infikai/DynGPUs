@@ -152,6 +152,8 @@ def train(state):
         for i in range(0, len(data), args.batch_size):
             if hvd.rank() == 1 and idx == 0:
                 logging.info("Train Loop.")
+            if hvd.rank() == 0 and idx == 0:
+                logging.info("Throughput: 0 images/second.")
             #     print(f'Time: {time.time() - start_train}s')
             #     int_train = time.time()
             data_batch = data[i:i + args.batch_size]
