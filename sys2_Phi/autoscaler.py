@@ -115,23 +115,28 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
     Generates and writes a new nginx.conf from a template.
     
     --- MODIFIED ---
-    Removed 'least_conn'. For streaming workloads (like vLLM),
-    the default Round Robin is often fairer and more predictable.
-    'least_conn' fails when one "connection" can be a 30-second
-    stream while another is a 0.5-second request.
+    Uses 'random two least_conn' as the balancing method.
+    This is the most effective algorithm in open-source Nginx
+    for this type of workload. It avoids the pitfalls of
+    simple round-robin by picking two random servers and
+    sending the request to the *better* of those two.
     """
     print("\nUpdating Nginx configuration...")
     
-    # Just list the servers. Nginx will default to round-robin.
-    upstream_servers = "".join([f"        server {s['host']}:{s['port']};\n" for s in active_servers])
+    # Create a list of server lines
+    server_lines = "".join([f"        server {s['host']}:{s['port']};\n" for s in active_servers])
+    
+    # Prepend the balancing algorithm
+    upstream_config = "        random two least_conn;\n" + server_lines
     
     try:
         with open(NGINX_TEMPLATE_PATH, "r") as f: template = f.read()
-        
-        with open(NGINX_CONF_PATH, "w") as f: 
-            f.write(template.replace("{UPSTREAM_SERVERS}", upstream_servers))
             
-        print(f"Nginx config updated with {len(active_servers)} active servers (using default Round Robin).")
+        with open(NGINX_CONF_PATH, "w") as f: 
+            # Replace the placeholder with the full upstream config
+            f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
+            
+        print(f"Nginx config updated with {len(active_servers)} active servers (using 'random two least_conn').")
         return True
     except Exception as e:
         print(f"\nERROR: Failed to write Nginx config: {e}"); return False
