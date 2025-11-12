@@ -1,2 +1,2 @@
-node2:2
 node3:4
+node2:2
