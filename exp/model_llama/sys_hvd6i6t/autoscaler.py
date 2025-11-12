@@ -5,6 +5,7 @@ import time
 import numpy as np
 import asyncssh
 from typing import List, Dict
+import copy
 
 # --- ⚙️ Configuration ---
 # File Paths
