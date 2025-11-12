@@ -324,11 +324,7 @@ async def autoscaler_task():
 
             if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
 
-            if avg_load_per_server < SCALE_DOWN_THRESHOLD:
-                scale_factor = avg_load_per_server / SCALE_DOWN_THRESHOLD if SCALE_DOWN_THRESHOLD > 0 else 0
-                num_to_scale = max(1, int(len(active_servers) * (1 - scale_factor)))
-                if await scale_down(count=num_to_scale): last_scaling_time = time.time()
-            elif avg_load_per_server > SCALE_UP_THRESHOLD:
+            if avg_load_per_server > SCALE_UP_THRESHOLD:
                 scale_factor = avg_load_per_server / SCALE_UP_THRESHOLD if SCALE_UP_THRESHOLD > 0 else 1
                 num_to_scale = max(1, int(len(active_servers) * (scale_factor - 1)))
                 if await scale_up(count=num_to_scale): last_scaling_time = time.time()
