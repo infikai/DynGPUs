@@ -1,1 +1,3 @@
-node
+node3 slots=4
+node2 slots=4
+node1 slots=3
