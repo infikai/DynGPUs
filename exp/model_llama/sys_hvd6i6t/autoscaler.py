@@ -40,6 +40,8 @@ ALL_SERVERS = [
     # Shared servers that have a corresponding training rank
 ]
 
+ORIGINAL_SERVER_CONFIG = copy.deepcopy(ALL_SERVERS)
+
 async def check_gpu_memory_is_free(server: Dict) -> bool:
     """
     Connects to a server via SSH and polls nvidia-smi until the GPU's memory
@@ -323,6 +325,44 @@ async def autoscaler_task():
                 num_to_scale = max(1, int(len(active_servers) * (scale_factor - 1)))
                 if await scale_up(count=num_to_scale): last_scaling_time = time.time()
 
+async def shutdown_and_reset():
+    """
+    Compares the current server state to the original hardcoded state
+    and sends commands to revert all servers.
+    """
+    print("\nShutting down... Resetting all servers to their initial state.")
+    
+    tasks = []
+    # We compare the *current* state (ALL_SERVERS) to the *original*
+    for i, current_server in enumerate(ALL_SERVERS):
+        # Assumes ORIGINAL_SERVER_CONFIG and ALL_SERVERS have the same order
+        initial_server = ORIGINAL_SERVER_CONFIG[i]
+        
+        current_status = current_server['status']
+        initial_status = initial_server['status']
+        
+        if current_status != initial_status:
+            print(f"Resetting {current_server['host']}:{current_server['port']} from '{current_status}' to '{initial_status}'")
+            # If initial_status is 'sleeping', then sleep=True
+            tasks.append(set_server_sleep_state(current_server, sleep=(initial_status == 'sleeping')))
+    
+    if tasks:
+        try:
+            # Run all reset commands concurrently
+            await asyncio.gather(*tasks)
+            print("All servers have been reset to their initial state.")
+        except Exception as e:
+            print(f"ERROR during server reset: {e}")
+    else:
+        print("All servers are already in their initial state.")
+
+    # Finally, reset Nginx to only contain the *initially* active servers
+    initial_active_servers = [s for s in ORIGINAL_SERVER_CONFIG if s['status'] == 'active']
+    print(f"Resetting Nginx to {len(initial_active_servers)} initial server(s)...")
+    if await update_nginx_config(initial_active_servers):
+        reload_nginx()
+    print("Shutdown and reset complete.")
+
 # --- Main Execution ---
 
 if __name__ == "__main__":
@@ -336,4 +376,18 @@ if __name__ == "__main__":
     try:
         loop.run_forever()
     except KeyboardInterrupt:
-        print("\nAutoscaler stopped by user.")
+        # --- NEW: Graceful shutdown and reset logic ---
+        print("\nKeyboardInterrupt caught, initiating graceful shutdown...")
+        
+        # 1. Cancel the main background tasks
+        log_task.cancel()
+        autoscaler_task_obj.cancel()
+        
+        # 2. Run the async reset function
+        # We use run_until_complete to execute our async cleanup
+        loop.run_until_complete(shutdown_and_reset())
+        
+    finally:
+        # 3. Clean up the loop
+        print("Stopping event loop.")
+        loop.close()
