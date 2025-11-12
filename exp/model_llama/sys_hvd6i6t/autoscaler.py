@@ -367,12 +367,19 @@ async def shutdown_and_reset():
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    if update_nginx_config(ALL_SERVERS):
+    # --- MODIFIED: Fix for startup ---
+    # Only configure Nginx with the *initially active* servers
+    # The original script passed ALL_SERVERS, which was a bug.
+    initial_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+    print(f"Starting... configuring Nginx with {len(initial_active_servers)} initial server(s).")
+    if update_nginx_config(initial_active_servers):
         reload_nginx()
 
     loop = asyncio.get_event_loop()
-    loop.create_task(log_active_servers())
-    loop.create_task(autoscaler_task())
+    
+    # Keep references to tasks to cancel them
+    log_task = loop.create_task(log_active_servers())
+    autoscaler_task_obj = loop.create_task(autoscaler_task())
     
     try:
         loop.run_forever()
