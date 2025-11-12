@@ -123,33 +123,31 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
     Generates and writes a new nginx.conf from a template.
     
     --- MODIFIED ---
-    Uses the 'least_conn' directive to balance load based on active connections.
-    This effectively weights traffic away from servers that are busy
-    (e.g., high running + waiting requests), matching your requirement.
+    Uses 'random two least_conn' as the balancing method.
+    This is the most effective algorithm in open-source Nginx
+    for this type of workload. It avoids the pitfalls of
+    simple round-robin by picking two random servers and
+    sending the request to the *better* of those two.
     """
     print("\nUpdating Nginx configuration...")
     
     # Create a list of server lines
-    server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
+    server_lines = "".join([f"        server {s['host']}:{s['port']};\n" for s in active_servers])
     
-    # Prepend the 'least_conn' directive to the server list
-    # This instructs Nginx to send traffic to the server with the
-    # fewest active connections.
-    upstream_config = "        least_conn;\n" + "".join(server_lines)
+    # Prepend the balancing algorithm
+    upstream_config = "        random two least_conn;\n" + server_lines
     
     try:
-        with open(NGINX_TEMPLATE_PATH, "r") as f: 
-            template = f.read()
+        with open(NGINX_TEMPLATE_PATH, "r") as f: template = f.read()
             
         with open(NGINX_CONF_PATH, "w") as f: 
             # Replace the placeholder with the full upstream config
             f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
             
-        print(f"Nginx config updated with {len(active_servers)} active servers (using 'least_conn').")
+        print(f"Nginx config updated with {len(active_servers)} active servers (using 'random two least_conn').")
         return True
     except Exception as e:
-        print(f"\nERROR: Failed to write Nginx config: {e}")
-        return False
+        print(f"\nERROR: Failed to write Nginx config: {e}"); return False
 
 def reload_nginx():
     """Executes the command to reload Nginx gracefully."""
