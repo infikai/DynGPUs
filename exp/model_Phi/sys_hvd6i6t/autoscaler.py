@@ -14,8 +14,8 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 HOROVOD_HOSTFILE_PATH = "/mydata/Data/DynGPUs/horovod/hostfile.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 40
-SCALE_UP_THRESHOLD = 50
+SCALE_DOWN_THRESHOLD = 5
+SCALE_UP_THRESHOLD = 10
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 4

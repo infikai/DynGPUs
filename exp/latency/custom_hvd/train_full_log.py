@@ -25,7 +25,7 @@ class TrainingState:
 
 def main():
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training with Dynamic GPUs and CLI args')
-    parser.add_argument('--model', default='vit_l_32', type=str,
+    parser.add_argument('--model', default='resnet50', type=str,
                         help='model to train (e.g., resnet50, vit_l_32)',
                         choices=['resnet50', 'vit_l_32'])
     parser.add_argument('--batch_size', default=128, type=int,
