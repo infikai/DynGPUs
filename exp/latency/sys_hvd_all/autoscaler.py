@@ -11,15 +11,15 @@ from typing import List, Dict
 NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
-HOROVOD_HOSTFILE_PATH = "/mydata/Data/DynGPUs/exp/latency/horovod_all/hostfile.txt"
+HOROVOD_HOSTFILE_PATH = "/mydata/Data/DynGPUs/horovod/hostfile.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 25
-SCALE_UP_THRESHOLD = 35
+SCALE_DOWN_THRESHOLD = 40
+SCALE_UP_THRESHOLD = 50
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
-SCALING_COOLDOWN_SECONDS = 20
+SCALING_COOLDOWN_SECONDS = 40
 MONITOR_INTERVAL_SECONDS = 2
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 3500
@@ -39,7 +39,7 @@ ALL_SERVERS = [
     {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
     {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
     {"host": "10.10.3.2", "port": 8002, "status": "sleeping", "rank": 6, "shared": True},
-    {"host": "10.10.3.2", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
+    {"host": "10.10.3.2", "port": 8003, "status": "sleeping", "rank": 7, "shared": True}, # On Node 2
     
     # node3 (10.10.3.3)
     {"host": "10.10.3.3", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
@@ -163,34 +163,25 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
 
 async def update_nginx_config(active_servers: List[Dict]) -> bool:
     """
-    Generates and writes a new nginx.conf from a template.
-    
-    --- MODIFIED ---
-    Uses 'random two least_conn' as the balancing method.
-    This is the most effective algorithm in open-source Nginx
-    for this type of workload. It avoids the pitfalls of
-    simple round-robin by picking two random servers and
-    sending the request to the *better* of those two.
+    Generates and writes a new nginx.conf from a template using 'least_conn'.
     """
     print("\nUpdating Nginx configuration...")
     
-    # Create a list of server lines
-    server_lines = "".join([f"        server {s['host']}:{s['port']};\n" for s in active_servers])
-    
-    # Prepend the balancing algorithm
-    upstream_config = "        random two least_conn;\n" + server_lines
+    server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
+    upstream_config = "        least_conn;\n" + "".join(server_lines)
     
     try:
-        with open(NGINX_TEMPLATE_PATH, "r") as f: template = f.read()
+        with open(NGINX_TEMPLATE_PATH, "r") as f: 
+            template = f.read()
             
         with open(NGINX_CONF_PATH, "w") as f: 
-            # Replace the placeholder with the full upstream config
             f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
             
-        print(f"Nginx config updated with {len(active_servers)} active servers (using 'random two least_conn').")
+        print(f"Nginx config updated with {len(active_servers)} active servers (using 'least_conn').")
         return True
     except Exception as e:
-        print(f"\nERROR: Failed to write Nginx config: {e}"); return False
+        print(f"\nERROR: Failed to write Nginx config: {e}")
+        return False
 
 def reload_nginx():
     print("Reloading Nginx...")
@@ -423,7 +414,7 @@ async def autoscaler_task():
 
 if __name__ == "__main__":
     # Set global rank state
-    global CURRENT_TRAINING_RANKS
+    # --- FIX: Removed 'global' keyword ---
     CURRENT_TRAINING_RANKS = sorted(ALL_SHARED_RANKS)
     
     # On startup, set Nginx to only the initially 'active' servers
