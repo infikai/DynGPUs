@@ -39,7 +39,7 @@ ALL_SERVERS = [
     {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
     {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
     {"host": "10.10.3.2", "port": 8002, "status": "sleeping", "rank": 6, "shared": True},
-    {"host": "10.10.3.3", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
+    {"host": "10.10.3.2", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
 
     {"host": "10.10.3.3", "port": 8002, "status": "sleeping", "rank": 2, "shared": True},
     {"host": "10.10.3.3", "port": 8003, "status": "sleeping", "rank": 3, "shared": True},
