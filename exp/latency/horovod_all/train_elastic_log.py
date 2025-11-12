@@ -83,7 +83,7 @@ def train(state):
     global last_log_time
     global processed
     # Configure logging to a file, only for the master worker (rank 0)
-    if hvd.rank() == 0:
+    if hvd.rank() != 1:
         logging.basicConfig(filename='throughput.log',
                             level=logging.INFO,
                             format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
@@ -152,7 +152,7 @@ def train(state):
         for i in range(0, len(data), args.batch_size):
             if hvd.rank() == 1 and idx == 0:
                 logging.info("Train Loop.")
-            if hvd.rank() == 0 and idx == 0:
+            if hvd.rank() != 1 and idx == 0:
                 logging.info("Throughput: 0 images/second.")
             #     print(f'Time: {time.time() - start_train}s')
             #     int_train = time.time()
@@ -220,7 +220,7 @@ def train(state):
                           f'Loss {loss.item():.4f}\t')
                 print(f'Batch time: {end_batch - start_batch}s; OP step time: {end_batch - start_op}s')
         throughput = images / (end_batch - start_batch)
-        if hvd.rank() == 0:
+        if hvd.rank() != 1:
             logging.info(f'Throughput: {throughput} images/second.')
 
 
