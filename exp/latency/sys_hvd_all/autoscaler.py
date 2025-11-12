@@ -101,7 +101,7 @@ def write_horovod_hostfile(ranks: List[int]):
             content_lines.append(f"{nodename}:{count}")
     
     # Ensure stable order
-    content_lines.sort()
+    # content_lines.sort()
     content = "\n".join(content_lines)
     
     if not content:
