@@ -77,7 +77,7 @@ def write_horovod_hostfile(ranks: List[int]):
     }
     
     # 2. Count active training ranks per nodename
-    nodename_counts = {"node1": 0, "node2": 0, "node3": 0}
+    nodename_counts = {"node3": 0, "node2": 0, "node1": 0}
     
     # Force reserved ranks to be in the list, just in case.
     active_shared_ranks = list(set(ranks) | set(RESERVED_TRAINING_RANKS))
