@@ -25,7 +25,7 @@ class TrainingState:
 
 def main():
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training with Dynamic GPUs and CLI args')
-    parser.add_argument('--model', default='vit_l_32', type=str,
+    parser.add_argument('--model', default='resnet50', type=str,
                         help='model to train (e.g., resnet50, vit_l_32)',
                         choices=['resnet50', 'vit_l_32'])
     parser.add_argument('--batch_size', default=128, type=int,
@@ -98,6 +98,20 @@ def main():
                 ST_config = time.time()
                 fisrt_batch = True
                 sync = True
+
+                if hvd.rank() == 0:
+                    ST_chk = time.time()
+                    filepath = './checkpoint.pth.tar'
+                    chk_state = {
+                        'model': model.state_dict(),
+                        'optimizer': base_optimizer.state_dict(),
+                    }
+                    torch.save(chk_state, filepath)
+
+                    checkpoint = torch.load(filepath)
+                    model.load_state_dict(checkpoint['model'])
+                    base_optimizer.load_state_dict(checkpoint['optimizer'])
+                    print(f'Chk Cost: {time.time() - ST_chk}s')
 
                 if hvd.rank() == 0:
                     active_ranks = read_active_ranks_from_file()
@@ -247,7 +261,7 @@ def main():
             state.processed_num = 0
             config_changed = True
 
-def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/exp/latency/custom_hvd_vit/active_workers.txt'):
+def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/exp/latency/custom_chk_vit/active_workers.txt'):
     try:
         if not os.path.exists(filepath):
             time.sleep(1)
