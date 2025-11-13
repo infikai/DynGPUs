@@ -23,7 +23,7 @@ SCALING_COOLDOWN_SECONDS = 40
 MONITOR_INTERVAL_SECONDS = 2
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 5000
-GPU_FREE_TIMEOUT_SECONDS = 15  # --- NEW: Max time to wait for GPU memory to become free ---
+GPU_FREE_TIMEOUT_SECONDS = 25  # --- NEW: Max time to wait for GPU memory to become free ---
 GPU_FREE_POLL_INTERVAL_SECONDS = 1 # --- NEW: How often to check the GPU memory ---
 
 
