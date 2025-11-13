@@ -11,7 +11,7 @@ from typing import List, Dict
 NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
 NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
-ACTIVE_WORKERS_FILE = "/mydata/Data/DynGPUs/exp/latency/custom_hvd/active_workers.txt"
+ACTIVE_WORKERS_FILE = "/mydata/Data/DynGPUs/exp/latency/custom_chk/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
 SCALE_DOWN_THRESHOLD = 25
