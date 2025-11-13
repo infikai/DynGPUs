@@ -14,8 +14,8 @@ NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 25
-SCALE_UP_THRESHOLD = 35
+SCALE_DOWN_THRESHOLD = 10
+SCALE_UP_THRESHOLD = 15
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
