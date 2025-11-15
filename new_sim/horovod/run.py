@@ -158,7 +158,7 @@ if __name__ == "__main__":
         scheduler = Scheduler(job_workload, cluster, 
                               progress_interval=args.progress_interval,
                               log_interval=args.log_interval,
-                              policy_interval=args.policy_interval,
+                            #   policy_interval=args.policy_interval,
                               start_time=args.start_time,
                               end_time=args.end_time,
                               tick_duration=args.tick_duration)
