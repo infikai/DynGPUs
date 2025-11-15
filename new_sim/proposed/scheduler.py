@@ -85,7 +85,7 @@ class Scheduler:
         """
         Dispatches a batch of LLM jobs using the new 3-priority policy.
         P1: Fill existing non-draining servers
-        P2: Preempt training jobs (and set drain timer)
+        P2: Preempt training jobs (ONLY if knob is active)
         P3: Grab idle GPUs
         """
         if not llm_jobs:
@@ -98,9 +98,8 @@ class Scheduler:
         existing_servers.sort(key=lambda g: g.llm_slots_available, reverse=True)
 
         for gpu in existing_servers:
-            # --- MODIFIED: Check if GPU is draining ---
             if not gpu.is_available_for_llm(self.clock.current_time):
-                continue # This GPU is draining, skip it.
+                continue 
                 
             slots_to_fill = gpu.llm_slots_available
             for _ in range(slots_to_fill):
@@ -113,58 +112,69 @@ class Scheduler:
             if not jobs_to_assign: break
 
         if not jobs_to_assign:
-            return [] # All jobs assigned
+            return [] 
 
-        # --- Priority 2: Preempt "safe" training jobs ---
-        print(f"    [LLM Dispatch] P1 full. {len(jobs_to_assign)} jobs remain. Trying P2 (Preempt).")
-        while jobs_to_assign:
-            victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
-            if not victim_job:
-                break # No more eligible victims
+        # --- NEW: Check the "knob" before activating P2 ---
+        
+        # A "non-draining" server is a permanent server (P1 or P3)
+        non_draining_servers_count = sum(1 for gpu in self.cluster.gpus 
+                                         if gpu.is_llm_server and gpu.drain_at_time == -1)
+        
+        # The knob: Only allow preemption if we are *already* over the target
+        # number of permanent (non-draining) servers.
+        allow_preemption = non_draining_servers_count > self.cluster.target_llm_servers
+
+        if allow_preemption:
+            # --- Priority 2: Preempt "safe" training jobs ---
+            print(f"    [LLM Dispatch] P1 full. Knob active (Servers: {non_draining_servers_count} > Target: {self.cluster.target_llm_servers}). Trying P2 (Preempt).")
+            while jobs_to_assign:
+                victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
+                if not victim_job:
+                    break 
+                
+                print(f"    [LLM Dispatch] P2: Preempting Job {victim_job.id} on GPU {victim_gpu.gpu_id}.")
+                victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+                self.preemption_map[victim_gpu.gpu_id] = victim_job
+                self.preemption_count += 1
+                
+                drain_time = self.clock.current_time + 100.0
+                victim_gpu.convert_to_llm_server(drain_at_time=drain_time)
+                
+                slots_to_fill = victim_gpu.llm_slots_available
+                for _ in range(slots_to_fill):
+                    if not jobs_to_assign: break
+                    job = jobs_to_assign.popleft()
+                    job.assigned_gpus = [victim_gpu]
+                    job.start_time = self.clock.current_time
+                    victim_gpu.assign_llm_task(job) 
+                    self.running_jobs.append(job)
+        else:
+            print(f"    [LLM Dispatch] P1 full. Knob inactive (Servers: {non_draining_servers_count} <= Target: {self.cluster.target_llm_servers}). Skipping P2.")
             
-            print(f"    [LLM Dispatch] P2: Preempting Job {victim_job.id} on GPU {victim_gpu.gpu_id}.")
-            victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
-            self.preemption_map[victim_gpu.gpu_id] = victim_job
-            self.preemption_count += 1
-            
-            # --- MODIFIED: Convert GPU and set its drain timer ---
-            drain_time = self.clock.current_time + 100.0
-            victim_gpu.convert_to_llm_server(drain_at_time=drain_time)
-            
-            # Fill the new server
-            slots_to_fill = victim_gpu.llm_slots_available
-            for _ in range(slots_to_fill):
-                if not jobs_to_assign: break
-                job = jobs_to_assign.popleft()
-                job.assigned_gpus = [victim_gpu]
-                job.start_time = self.clock.current_time
-                victim_gpu.assign_llm_task(job)
-                self.running_jobs.append(job)
+        # --- END OF MODIFIED SECTION ---
 
         if not jobs_to_assign:
-            return [] # All jobs assigned
+            return []
 
         # --- Priority 3: Grab idle GPUs and convert them ---
-        print(f"    [LLM Dispatch] P2 full. {len(jobs_to_assign)} jobs remain. Trying P3 (Expand).")
+        print(f"    [LLM Dispatch] P2 skipped or full. {len(jobs_to_assign)} jobs remain. Trying P3 (Expand).")
         while jobs_to_assign:
             idle_gpus = self.cluster.find_idle_gpus(1)
             if not idle_gpus:
-                break # No more idle GPUs in the entire cluster
+                break 
             
             gpu_to_convert = idle_gpus[0]
             print(f"    [LLM Dispatch] P3: Expanding pool with idle GPU {gpu_to_convert.gpu_id}.")
             
-            # --- MODIFIED: Convert without a drain timer ---
-            gpu_to_convert.convert_to_llm_server() # Uses default drain_at_time=-1
+            gpu_to_convert.convert_to_llm_server() 
             
-            # Fill the new server
             slots_to_fill = gpu_to_convert.llm_slots_available
             for _ in range(slots_to_fill):
                 if not jobs_to_assign: break
                 job = jobs_to_assign.popleft()
                 job.assigned_gpus = [gpu_to_convert]
                 job.start_time = self.clock.current_time
-                gpu_to_convert.assign_llm_task(job)
+                gpu_to_convert.assign_llm_task(job) 
                 self.running_jobs.append(job)
 
         return list(jobs_to_assign)
@@ -285,31 +295,37 @@ class Scheduler:
                          f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{job.gpus_needed}\n")
             self.training_log_file.write(log_entry)
 
-        # --- NEW/MODIFIED: Switch-back logic for LLM and other inference jobs ---
+        llm_server_became_empty = False
+
         for gpu in freed_gpus:
             # Check if this GPU was a P2 (preempted) server
             if gpu.gpu_id in self.preemption_map:
-                # If the GPU is now idle (which it should be if it's not an
-                # empty LLM server), or if it's an EMPTY LLM server, reclaim it.
+                # Check if it's empty
                 if gpu.is_idle() or (gpu.is_llm_server and not gpu.running_tasks):
-                    reclaiming_job = self.preemption_map.pop(gpu.gpu_id)
+                    reclaiming_job = self.preemption_map.pop(gpu.gpu_id) # Pop it
                     
                     if reclaiming_job in self.running_jobs:
                         if gpu.is_llm_server:
-                            gpu.revert_from_llm_server() # Revert before reclaiming
-                            
+                            gpu.revert_from_llm_server() # Revert
+                        
                         reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
                         self.reclamation_count += 1
                         print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu.gpu_id} for training job {reclaiming_job.id}.")
                     
+                    # --- THIS IS THE FIX ---
+                    # The original training job is gone, but the P2 server is now
+                    # empty. We MUST revert it to prevent a "zombie" server.
+                    elif gpu.is_llm_server:
+                        print(f"    [LLM Zombie Cleanup] Reverting P2 server {gpu.gpu_id} (original job {reclaiming_job.id} is gone).")
+                        gpu.revert_from_llm_server()
+                    # --- END FIX ---
+            
             # Check if this GPU was a P3 (expansion) server
             elif gpu.is_llm_server and not gpu.running_tasks:
-                # This is an empty LLM server that was NOT from preemption.
-                # Check if we are over our target server count.
-                num_llm_servers = sum(1 for g in self.cluster.gpus if g.is_llm_server)
-                if num_llm_servers > self.cluster.target_llm_servers:
-                    print(f"    [LLM Scale-Down] Reverting expansion server {gpu.gpu_id}. (Count: {num_llm_servers} > Target: {self.cluster.target_llm_servers})")
-                    gpu.revert_from_llm_server()
+                llm_server_became_empty = True
+
+        if llm_server_became_empty:
+            self._apply_scale_down_policy()
     
     def run_simulation(self):
         """Main simulation loop."""
