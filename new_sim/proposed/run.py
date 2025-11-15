@@ -8,8 +8,8 @@ from components import Job
 import time
 
 # --- NEW: Define the target number of permanent LLM servers ---
-TARGET_LLM_SERVERS = 70
-TOTAL_GPUS = 1220 # 600 training + 620 inference from old config
+TARGET_LLM_SERVERS = 250
+TOTAL_GPUS = 1200
 
 def load_jobs_from_csv(file_path):
     """
