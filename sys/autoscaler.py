@@ -14,12 +14,12 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 ACTIVE_WORKERS_FILE = "/mydata/Data/DynGPUs/custom_hvd/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 45
-SCALE_UP_THRESHOLD = 55
+SCALE_DOWN_THRESHOLD = 35
+SCALE_UP_THRESHOLD = 45
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 4
-SCALING_COOLDOWN_SECONDS = 40
+MIN_ACTIVE_SERVERS = 1
+SCALING_COOLDOWN_SECONDS = 10
 MONITOR_INTERVAL_SECONDS = 2
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 5000
@@ -31,15 +31,18 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1 # --- NEW: How often to check the GPU memory 
 # `rank` only exists for shared servers that are part of the training job.
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
-    {"host": "10.10.3.1", "port": 8000, "status": "active", "shared": False},
-    {"host": "10.10.3.1", "port": 8001, "status": "active", "shared": False},
-    {"host": "10.10.3.1", "port": 8002, "status": "active", "shared": False},
+    {"host": "10.10.3.1", "port": 8000, "status": "sleeping", "rank": 8, "shared": True},
+    {"host": "10.10.3.1", "port": 8001, "status": "sleeping", "rank": 9, "shared": True},
+    {"host": "10.10.3.1", "port": 8002, "status": "sleeping", "rank": 10, "shared": True},
     {"host": "10.10.3.1", "port": 8003, "status": "active", "shared": False},
     # Shared servers that have a corresponding training rank
     {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
     {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
     {"host": "10.10.3.2", "port": 8002, "status": "sleeping", "rank": 6, "shared": True},
-    {"host": "10.10.3.2", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
+    {"host": "10.10.3.3", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
+
+    {"host": "10.10.3.3", "port": 8002, "status": "sleeping", "rank": 2, "shared": True},
+    {"host": "10.10.3.3", "port": 8003, "status": "sleeping", "rank": 3, "shared": True},
 ]
 
 
@@ -116,16 +119,37 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
     return {"running": running, "waiting": waiting}
 
 async def update_nginx_config(active_servers: List[Dict]) -> bool:
-    """Generates and writes a new nginx.conf from a template."""
+    """
+    Generates and writes a new nginx.conf from a template.
+    
+    --- MODIFIED ---
+    Uses the 'least_conn' directive to balance load based on active connections.
+    This effectively weights traffic away from servers that are busy
+    (e.g., high running + waiting requests), matching your requirement.
+    """
     print("\nUpdating Nginx configuration...")
-    upstream_servers = "".join([f"        server {s['host']}:{s['port']};\n" for s in active_servers])
+    
+    # Create a list of server lines
+    server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
+    
+    # Prepend the 'least_conn' directive to the server list
+    # This instructs Nginx to send traffic to the server with the
+    # fewest active connections.
+    upstream_config = "        least_conn;\n" + "".join(server_lines)
+    
     try:
-        with open(NGINX_TEMPLATE_PATH, "r") as f: template = f.read()
-        with open(NGINX_CONF_PATH, "w") as f: f.write(template.replace("{UPSTREAM_SERVERS}", upstream_servers))
-        print(f"Nginx config updated with {len(active_servers)} active servers.")
+        with open(NGINX_TEMPLATE_PATH, "r") as f: 
+            template = f.read()
+            
+        with open(NGINX_CONF_PATH, "w") as f: 
+            # Replace the placeholder with the full upstream config
+            f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
+            
+        print(f"Nginx config updated with {len(active_servers)} active servers (using 'least_conn').")
         return True
     except Exception as e:
-        print(f"\nERROR: Failed to write Nginx config: {e}"); return False
+        print(f"\nERROR: Failed to write Nginx config: {e}")
+        return False
 
 def reload_nginx():
     """Executes the command to reload Nginx gracefully."""
