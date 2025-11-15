@@ -138,7 +138,7 @@ class Scheduler:
                 job = jobs_to_assign.popleft()
                 job.assigned_gpus = [victim_gpu]
                 job.start_time = self.clock.current_time
-                gpu.assign_llm_task(job) # Note: this should be victim_gpu
+                victim_gpu.assign_llm_task(job)
                 self.running_jobs.append(job)
 
         if not jobs_to_assign:
@@ -164,7 +164,7 @@ class Scheduler:
                 job = jobs_to_assign.popleft()
                 job.assigned_gpus = [gpu_to_convert]
                 job.start_time = self.clock.current_time
-                gpu.assign_llm_task(job) # Note: this should be gpu_to_convert
+                gpu_to_convert.assign_llm_task(job)
                 self.running_jobs.append(job)
 
         return list(jobs_to_assign)
