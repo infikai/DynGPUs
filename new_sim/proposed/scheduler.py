@@ -1,0 +1,437 @@
+# file: scheduler.py
+
+import math
+from collections import deque
+from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATION_PERCENT, 
+                        PREEMPTION_OVERHEAD, RECLAMATION_OVERHEAD, 
+                        LLM_POLICY_INTERVAL, LLM_MAX_CONCURRENCY, PREEMPTION_COOLDOWN)
+
+class Scheduler:
+    """
+    Manages job scheduling with constrained preemption for LLM jobs
+    in a unified GPU cluster.
+    """
+    def __init__(self, jobs_list, cluster_manager, progress_interval, log_interval, start_time, end_time, tick_duration, end_time_threshold):
+        self.pending_jobs = deque(sorted(jobs_list, key=lambda j: j.arrival_time))
+        self.running_jobs = []
+        self.completed_jobs = []
+        self.cluster = cluster_manager
+        self.clock = SimulationClock(tick_duration=tick_duration)
+        self.preemption_count = 0
+        self.reclamation_count = 0
+        self.preemption_map = {} # Maps gpu_id -> preempted training job
+
+        # Intervals
+        self.progress_interval = progress_interval
+        self.log_interval = log_interval
+        # --- REMOVED: policy_interval ---
+        self.start_time = start_time
+        self.end_time = end_time
+
+        # --- NEW: Store threshold ---
+        self.end_time_threshold = end_time_threshold
+
+        # Initialize log files
+        self.training_log_file = open("training_job_log.csv", "w")
+        self.usage_log_file = open("gpu_usage_log.csv", "w")
+        self._initialize_logs()
+
+    def _initialize_logs(self):
+        """Writes headers to the log files."""
+        self.training_log_file.write("job_id,arrival_time,base_duration,ideal_completion_time,actual_completion_time,performance_factor,gpus\n")
+        # --- MODIFIED: New log headers for unified pool ---
+        self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,llm_servers_total,llm_servers_busy\n")
+
+    def _log_gpu_usage(self):
+        """
+        Logs a snapshot of GPU usage in the unified pool.
+        """
+        # --- MODIFIED: Logic for unified pool ---
+        training_gpus_used = set()
+        inference_gpus_used = set() # For non-LLM inference
+        llm_servers_count = 0
+        llm_servers_busy = 0
+
+        for gpu in self.cluster.gpus:
+            if gpu.is_llm_server:
+                llm_servers_count += 1
+                if gpu.running_tasks:
+                    llm_servers_busy += 1
+            else:
+                # GPU is in the general pool
+                for task in gpu.running_tasks.values():
+                    job_type = task['job'].job_type
+                    if job_type == 'training':
+                        training_gpus_used.add(gpu.gpu_id)
+                    elif job_type == 'inference':
+                        inference_gpus_used.add(gpu.gpu_id)
+
+        self.usage_log_file.write(f"{self.clock.current_time},{len(training_gpus_used)},{len(inference_gpus_used)},{llm_servers_count},{llm_servers_busy}\n")
+
+    # --- REMOVED: _apply_adaptive_llm_policy ---
+
+    def _dispatch_job(self, job):
+        """Routes a job to the appropriate dispatch method based on its type."""
+        if job.job_type == 'training':
+            return self._dispatch_training_job(job)
+        elif job.job_type == 'inference':
+            return self._dispatch_inference_job(job)
+        elif job.job_type == 'llm_inference':
+            # This path is now for single jobs, batch is separate
+            return self._dispatch_llm_inference_job(job)
+        return False
+    
+    def _batch_dispatch_llm_jobs(self, llm_jobs):
+        """
+        Dispatches a batch of LLM jobs using the new 3-priority policy.
+        P1: Fill existing non-draining servers
+        P2: Preempt training jobs (and set drain timer)
+        P3: Grab idle GPUs
+        """
+        if not llm_jobs:
+            return []
+
+        jobs_to_assign = deque(llm_jobs)
+        
+        # --- Priority 1: Fill all available slots on existing LLM servers ---
+        existing_servers = [gpu for gpu in self.cluster.gpus if gpu.is_llm_server]
+        existing_servers.sort(key=lambda g: g.llm_slots_available, reverse=True)
+
+        for gpu in existing_servers:
+            # --- MODIFIED: Check if GPU is draining ---
+            if not gpu.is_available_for_llm(self.clock.current_time):
+                continue # This GPU is draining, skip it.
+                
+            slots_to_fill = gpu.llm_slots_available
+            for _ in range(slots_to_fill):
+                if not jobs_to_assign: break
+                job = jobs_to_assign.popleft()
+                job.assigned_gpus = [gpu]
+                job.start_time = self.clock.current_time
+                gpu.assign_llm_task(job)
+                self.running_jobs.append(job)
+            if not jobs_to_assign: break
+
+        if not jobs_to_assign:
+            return [] # All jobs assigned
+
+        # --- Priority 2: Preempt "safe" training jobs ---
+        print(f"    [LLM Dispatch] P1 full. {len(jobs_to_assign)} jobs remain. Trying P2 (Preempt).")
+        while jobs_to_assign:
+            victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
+            if not victim_job:
+                break # No more eligible victims
+            
+            print(f"    [LLM Dispatch] P2: Preempting Job {victim_job.id} on GPU {victim_gpu.gpu_id}.")
+            victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+            self.preemption_map[victim_gpu.gpu_id] = victim_job
+            self.preemption_count += 1
+            
+            # --- MODIFIED: Convert GPU and set its drain timer ---
+            drain_time = self.clock.current_time + 100.0
+            victim_gpu.convert_to_llm_server(drain_at_time=drain_time)
+            
+            # Fill the new server
+            slots_to_fill = victim_gpu.llm_slots_available
+            for _ in range(slots_to_fill):
+                if not jobs_to_assign: break
+                job = jobs_to_assign.popleft()
+                job.assigned_gpus = [victim_gpu]
+                job.start_time = self.clock.current_time
+                gpu.assign_llm_task(job) # Note: this should be victim_gpu
+                self.running_jobs.append(job)
+
+        if not jobs_to_assign:
+            return [] # All jobs assigned
+
+        # --- Priority 3: Grab idle GPUs and convert them ---
+        print(f"    [LLM Dispatch] P2 full. {len(jobs_to_assign)} jobs remain. Trying P3 (Expand).")
+        while jobs_to_assign:
+            idle_gpus = self.cluster.find_idle_gpus(1)
+            if not idle_gpus:
+                break # No more idle GPUs in the entire cluster
+            
+            gpu_to_convert = idle_gpus[0]
+            print(f"    [LLM Dispatch] P3: Expanding pool with idle GPU {gpu_to_convert.gpu_id}.")
+            
+            # --- MODIFIED: Convert without a drain timer ---
+            gpu_to_convert.convert_to_llm_server() # Uses default drain_at_time=-1
+            
+            # Fill the new server
+            slots_to_fill = gpu_to_convert.llm_slots_available
+            for _ in range(slots_to_fill):
+                if not jobs_to_assign: break
+                job = jobs_to_assign.popleft()
+                job.assigned_gpus = [gpu_to_convert]
+                job.start_time = self.clock.current_time
+                gpu.assign_llm_task(job) # Note: this should be gpu_to_convert
+                self.running_jobs.append(job)
+
+        return list(jobs_to_assign)
+
+    def _dispatch_llm_inference_job(self, job):
+        """
+        Schedules a *single* LLM inference request using the 3-priority policy.
+        """
+        # P1: Find existing server with slots
+        # --- MODIFIED: Pass current time ---
+        gpu = self.cluster.find_gpu_for_llm_job(self.clock.current_time)
+        
+        # P2: If none, preempt a "safe" training job
+        if not gpu:
+            victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
+            if victim_job and victim_gpu:
+                victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+                self.preemption_map[victim_gpu.gpu_id] = victim_job
+                self.preemption_count += 1
+                
+                # --- MODIFIED: Set drain timer ---
+                drain_time = self.clock.current_time + 100.0
+                victim_gpu.convert_to_llm_server(drain_at_time=drain_time)
+                gpu = victim_gpu
+        
+        # P3: If still none, grab an idle GPU
+        if not gpu:
+            idle_gpus = self.cluster.find_idle_gpus(1)
+            if idle_gpus:
+                gpu = idle_gpus[0]
+                # --- MODIFIED: Convert without drain timer ---
+                gpu.convert_to_llm_server()
+        
+        if gpu:
+            job.assigned_gpus = [gpu]
+            job.start_time = self.clock.current_time
+            gpu.assign_llm_task(job)
+            self.running_jobs.append(job)
+            return True
+            
+        return False # All priorities failed
+
+    def _dispatch_inference_job(self, job):
+        """Routes a non-LLM inference job."""
+        # --- MODIFIED: Removed SHARABLE_GPU_MEM_PENALTY_GB ---
+        is_large_job = (job.memory_required > GPU_MEMORY_GB or 
+                        job.utilization_required > GPU_UTILIZATION_PERCENT)
+        
+        if is_large_job:
+            return self._dispatch_large_inference_job(job)
+        else:
+            return self._dispatch_stackable_inference_job(job)
+
+    def _dispatch_stackable_inference_job(self, job):
+        """Schedules a small inference job. No preemption."""
+        job.gpus_needed = 1 
+        gpu = self.cluster.find_gpu_for_stackable_inference(job)
+        if gpu:
+            job.assign_resources([gpu], self.clock.current_time)
+            self.running_jobs.append(job)
+            return True
+        
+        # --- MODIFIED: No preemption for low-priority stackable jobs ---
+        return False
+
+    def _dispatch_large_inference_job(self, job):
+        """Schedules a large inference job. No preemption."""
+        # --- MODIFIED: Use unified pool constants ---
+        gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
+                          math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
+        job.gpus_needed = gpus_needed
+        
+        allocated_gpus = self.cluster.find_idle_gpus(gpus_needed)
+        
+        # --- MODIFIED: No preemption for low-priority large jobs ---
+        if len(allocated_gpus) == gpus_needed:
+            job.assign_resources(allocated_gpus, self.clock.current_time)
+            self.running_jobs.append(job)
+            return True
+        return False
+        
+    def _dispatch_training_job(self, job):
+        """Schedules a training job, no extra GPUs, sets threshold."""
+        gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
+                          math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
+        job.gpus_needed = gpus_needed
+
+        # --- NEW: Set the job's max allowable duration based on the threshold ---
+        job.max_allowable_duration = job.ideal_duration * self.end_time_threshold
+
+        # --- MODIFIED: Use the unified idle GPU finder ---
+        allocated_gpus = self.cluster.find_idle_gpus(gpus_needed)
+        
+        # --- MODIFIED: Removed all "extra GPU" / "greedy" logic ---
+        if len(allocated_gpus) == gpus_needed:
+            job.assign_resources(allocated_gpus, self.clock.current_time)
+            self.running_jobs.append(job)
+            return True
+            
+        return False
+         
+    def _handle_job_completion(self, job):
+        """
+        Processes a finished job, logs training data, and handles reclamation
+        and LLM server switch-back.
+        """
+        freed_gpus = list(job.assigned_gpus)
+        self.cluster.release_resources_for_job(job)
+        job.record_completion(self.clock.current_time)
+        self.running_jobs.remove(job)
+        self.completed_jobs.append(job)
+
+        if job.job_type == 'training':
+            ideal_completion_time = job.arrival_time + job.base_duration
+            actual_duration = job.completion_time - job.arrival_time
+            perf_factor = actual_duration / job.base_duration if job.base_duration > 0 else 0
+            log_entry = (f"{job.id},{job.arrival_time},{job.base_duration},"
+                         f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{job.gpus_needed}\n")
+            self.training_log_file.write(log_entry)
+
+        # --- NEW/MODIFIED: Switch-back logic for LLM and other inference jobs ---
+        for gpu in freed_gpus:
+            # Check if this GPU was a P2 (preempted) server
+            if gpu.gpu_id in self.preemption_map:
+                # If the GPU is now idle (which it should be if it's not an
+                # empty LLM server), or if it's an EMPTY LLM server, reclaim it.
+                if gpu.is_idle() or (gpu.is_llm_server and not gpu.running_tasks):
+                    reclaiming_job = self.preemption_map.pop(gpu.gpu_id)
+                    
+                    if reclaiming_job in self.running_jobs:
+                        if gpu.is_llm_server:
+                            gpu.revert_from_llm_server() # Revert before reclaiming
+                            
+                        reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
+                        self.reclamation_count += 1
+                        print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu.gpu_id} for training job {reclaiming_job.id}.")
+                    
+            # Check if this GPU was a P3 (expansion) server
+            elif gpu.is_llm_server and not gpu.running_tasks:
+                # This is an empty LLM server that was NOT from preemption.
+                # Check if we are over our target server count.
+                num_llm_servers = sum(1 for g in self.cluster.gpus if g.is_llm_server)
+                if num_llm_servers > self.cluster.target_llm_servers:
+                    print(f"    [LLM Scale-Down] Reverting expansion server {gpu.gpu_id}. (Count: {num_llm_servers} > Target: {self.cluster.target_llm_servers})")
+                    gpu.revert_from_llm_server()
+    
+    def run_simulation(self):
+        """Main simulation loop."""
+        if not self.pending_jobs: 
+            print("No jobs to simulate.")
+            self.print_results()
+            return
+
+        effective_start_time = self.start_time
+        if self.start_time == 0:
+            effective_start_time = self.pending_jobs[0].arrival_time
+            print(f"No specific start time given. Fast-forwarding to first job arrival at time {effective_start_time}.")
+
+        original_job_count = len(self.pending_jobs)
+        filtered_list = [j for j in self.pending_jobs if j.arrival_time >= effective_start_time]
+        self.pending_jobs = deque(filtered_list)
+        print(f"Filtered out {original_job_count - len(self.pending_jobs)} jobs that arrived before effective start time {effective_start_time}.")
+        
+        if not self.pending_jobs: 
+            print("No jobs to simulate in the specified time window.")
+            self.print_results()
+            return
+
+        self.clock.current_time = effective_start_time
+        self.jobs_to_retry = deque()
+
+        while self.pending_jobs or self.running_jobs or self.jobs_to_retry:
+            if self.end_time != -1 and self.clock.current_time >= self.end_time:
+                print(f"\n🛑 Simulation ended at specified end time: {self.end_time}")
+                break
+            
+            self.clock.tick()
+
+            if self.clock.current_time > 0:
+                # --- REMOVED: Adaptive LLM policy call ---
+                
+                # Log GPU usage
+                if self.clock.current_time % self.log_interval == 0:
+                    self._log_gpu_usage()
+            
+            if self.clock.current_time % self.progress_interval == 0 and (self.running_jobs or self.pending_jobs or self.jobs_to_retry):
+                
+                # --- MODIFIED: Get LLM server count from unified pool ---
+                num_llm_servers = sum(1 for gpu in self.cluster.gpus if gpu.is_llm_server)
+                num_llm_jobs = sum(1 for job in self.running_jobs if job.job_type == 'llm_inference')
+                
+                print(f"🕒 Clock {self.clock.current_time}: "
+                      f"Pending={len(self.pending_jobs)}, "
+                      f"Retrying={len(self.jobs_to_retry)}, "
+                      f"Running={len(self.running_jobs)} (LLM: {num_llm_jobs}), "
+                      f"LLM Servers={num_llm_servers}, "
+                      f"Completed={len(self.completed_jobs)}")
+            
+            # --- Fairer Dispatch Logic ---
+            arrived_jobs = list(self.jobs_to_retry)
+            self.jobs_to_retry.clear()
+            while self.pending_jobs and self.pending_jobs[0].arrival_time <= self.clock.current_time:
+                arrived_jobs.append(self.pending_jobs.popleft())
+
+            if arrived_jobs:
+                arrived_llm_jobs = [j for j in arrived_jobs if j.job_type == 'llm_inference']
+                other_arrived_jobs = [j for j in arrived_jobs if j.job_type != 'llm_inference']
+                
+                # --- MODIFIED: Use new batch dispatcher ---
+                unassigned_llm_jobs = self._batch_dispatch_llm_jobs(arrived_llm_jobs)
+
+                unassigned_other_jobs = []
+                for job in other_arrived_jobs:
+                    if not self._dispatch_job(job):
+                        unassigned_other_jobs.append(job)
+
+                all_unassigned = sorted(unassigned_llm_jobs + unassigned_other_jobs, key=lambda j: j.arrival_time)
+                self.jobs_to_retry.extend(all_unassigned)
+            
+            # --- Job Progress and Completion Handling ---
+            finished_this_tick = []
+            for job in self.running_jobs:
+                job.update_progress(self.clock.tick_duration, self.clock.current_time)
+                if job.is_complete():
+                    finished_this_tick.append(job)
+            
+            for job in finished_this_tick:
+                self._handle_job_completion(job)
+
+
+    def print_results(self):
+        """Prints a final summary and saves it to simulation_summary.txt."""
+        self.training_log_file.close()
+        self.usage_log_file.close()
+
+        with open("simulation_summary.txt", "w") as summary_file:
+            total_jobs = len(self.completed_jobs)
+            if total_jobs == 0:
+                summary_text = "No jobs were completed in the simulation window."
+                print(summary_text)
+                summary_file.write(summary_text + "\n")
+                return
+
+            training_jobs = [j for j in self.completed_jobs if j.job_type == 'training']
+            inference_jobs = [j for j in self.completed_jobs if j.job_type == 'inference']
+            llm_inference_jobs = [j for j in self.completed_jobs if j.job_type == 'llm_inference']
+            
+            avg_training_turnaround = sum(j.turnaround_time for j in training_jobs) / len(training_jobs) if training_jobs else 0
+            avg_inference_turnaround = sum(j.turnaround_time for j in inference_jobs) / len(inference_jobs) if inference_jobs else 0
+            avg_llm_turnaround = sum(j.turnaround_time for j in llm_inference_jobs) / len(llm_inference_jobs) if llm_inference_jobs else 0
+            
+            lines = [
+                "--- Simulation Results ---",
+                f"Detailed logs saved to 'training_job_log.csv' and 'gpu_usage_log.csv'",
+                f"Total Jobs Completed: {total_jobs}",
+                f"  - Training: {len(training_jobs)}",
+                f"  - Inference (Regular): {len(inference_jobs)}",
+                f"  - Inference (LLM): {len(llm_inference_jobs)}",
+                f"Total Preemptions (for LLM jobs): {self.preemption_count}",
+                f"Total Successful Reclamations: {self.reclamation_count}",
+                # --- REMOVED: max_locked_gpus ---
+                f"Average Training Job Turnaround: {avg_training_turnaround:.2f} seconds",
+                f"Average Inference (Regular) Job Turnaround: {avg_inference_turnaround:.2f} seconds",
+                f"Average Inference (LLM) Job Turnaround: {avg_llm_turnaround:.2f} seconds",
+                "--------------------------"
+            ]
+
+            for line in lines:
+                print(line)
+                summary_file.write(line + "\n")
