@@ -275,6 +275,46 @@ class Scheduler:
             return True
             
         return False
+
+    def _apply_scale_down_policy(self):
+        """
+        Checks for and reverts all idle P3 (expansion) servers
+        if the total server count is above the target.
+        """
+        num_llm_servers = sum(1 for g in self.cluster.gpus if g.is_llm_server)
+        
+        if num_llm_servers <= self.cluster.target_llm_servers:
+            return # We are at or below the target, nothing to do.
+
+        num_to_revert = num_llm_servers - self.cluster.target_llm_servers
+        if num_to_revert <= 0:
+            return
+            
+        # Find all P3 (expansion) servers that are idle.
+        # A P3 server is:
+        # 1. An LLM server
+        # 2. Empty (no running tasks)
+        # 3. NOT a P2 server (i.e., not in the preemption_map)
+        
+        candidates = []
+        for gpu in self.cluster.gpus:
+            if (gpu.is_llm_server and 
+                not gpu.running_tasks and 
+                gpu.gpu_id not in self.preemption_map):
+                
+                candidates.append(gpu)
+
+        if candidates:
+            # We only need to revert the excess
+            num_can_revert = min(len(candidates), num_to_revert)
+            
+            if num_can_revert > 0:
+                print(f"    [LLM Scale-Down Policy] Found {num_llm_servers} servers (Target: {self.cluster.target_llm_servers}). Reverting {num_can_revert} idle expansion servers.")
+                
+                # Revert up to num_to_revert
+                for i in range(num_can_revert):
+                    gpu_to_revert = candidates[i]
+                    gpu_to_revert.revert_from_llm_server()
          
     def _handle_job_completion(self, job):
         """
