@@ -69,50 +69,68 @@ class Scheduler:
              return self._dispatch_training_job(job)
         return False
     
-    def _dispatch_llm_inference_job(self, job):
-        # P1: Existing Server (Inference Pool)
-        gpu = self.cluster.find_gpu_for_llm_job(self.clock.current_time)
-        
-        # P2: Idle (Inference Pool)
-        if not gpu:
-            idle_infer_gpus = self.cluster.find_idle_gpus_in_inference_pool()
-            if idle_infer_gpus:
-                gpu = idle_infer_gpus[0]
-                gpu.convert_to_llm_server()
-
-        # P3: Borrow Idle (Training Pool)
-        if not gpu:
-            idle_train_gpus = self.cluster.find_idle_gpus_in_training_pool()
-            if idle_train_gpus:
-                gpu = idle_train_gpus[0]
-                gpu.convert_to_llm_server()
-
-        # P4: Reclaim (Preempt Squatters in Inference Pool)
-        if not gpu:
-            victim_job, victim_gpu = self.cluster.find_borrowed_gpu_to_reclaim(self.clock.current_time)
-            if victim_job and victim_gpu:
-                victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
-                self.preemption_map[victim_gpu.gpu_id] = victim_job
-                self.preemption_count += 1
-                victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 100)
-                gpu = victim_gpu
-
-        if gpu:
-            job.assigned_gpus = [gpu]
-            job.start_time = self.clock.current_time
-            delay = math.floor(max(0, job.start_time - job.arrival_time))
-            self.current_inference_delays.append(delay)
-            gpu.assign_llm_task(job)
-            self.running_jobs.append(job)
-            return True
-        return False 
-
     def _batch_dispatch_llm_jobs(self, llm_jobs):
-        remaining_jobs = []
-        for job in llm_jobs:
-            if not self._dispatch_llm_inference_job(job):
-                remaining_jobs.append(job)
-        return remaining_jobs
+        """
+        Dispatches a batch of LLM jobs by prioritizing resource pools and filling all available slots
+        before moving to the next resource priority.
+        """
+        jobs_to_assign = deque(llm_jobs)
+        
+        while jobs_to_assign:
+            gpu = None
+            
+            # --- P1: Existing Server with Slots (Inference Pool) ---
+            gpu = self.cluster.find_gpu_for_llm_job(self.clock.current_time)
+
+            # --- P2: Find idle Inference GPU (Convert and use) ---
+            if not gpu:
+                idle_infer_gpus = self.cluster.find_idle_gpus_in_inference_pool()
+                if idle_infer_gpus:
+                    gpu = idle_infer_gpus[0]
+                    gpu.convert_to_llm_server()
+
+            # --- P3: Borrow idle Training GPU (Convert and use) ---
+            if not gpu:
+                idle_train_gpus = self.cluster.find_idle_gpus_in_training_pool()
+                if idle_train_gpus:
+                    gpu = idle_train_gpus[0]
+                    gpu.convert_to_llm_server()
+
+            # --- P4: Reclaim from Training job squatting on Inference Pool ---
+            if not gpu:
+                victim_job, victim_gpu = self.cluster.find_borrowed_gpu_to_reclaim(self.clock.current_time)
+                if victim_job and victim_gpu:
+                    # Preemption costs are paid by the victim job
+                    victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+                    self.preemption_map[victim_gpu.gpu_id] = victim_job
+                    self.preemption_count += 1
+                    
+                    # Convert to LLM server and mark for draining later (when it gets reverted)
+                    victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 100)
+                    gpu = victim_gpu
+
+            if gpu:
+                slots_to_fill = gpu.llm_slots_available
+                
+                # Fill all available slots on the found GPU
+                for _ in range(slots_to_fill):
+                    if not jobs_to_assign:
+                        break 
+
+                    job = jobs_to_assign.popleft() 
+                    
+                    job.assigned_gpus = [gpu]
+                    job.start_time = self.clock.current_time
+                    delay = max(0, job.start_time - job.arrival_time)
+                    self.current_inference_delays.append(delay)
+                    
+                    gpu.assign_llm_task(job)
+                    self.running_jobs.append(job)
+            else:
+                # No more resources found across all priorities.
+                break 
+
+        return list(jobs_to_assign)
 
     def _dispatch_training_job(self, job):
         gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
@@ -261,6 +279,7 @@ class Scheduler:
                 arrived_llm_jobs = [j for j in arrived_jobs if j.job_type == 'llm_inference']
                 other_arrived_jobs = [j for j in arrived_jobs if j.job_type != 'llm_inference']
                 
+                # Use the fast batch dispatcher
                 unassigned_llm = self._batch_dispatch_llm_jobs(arrived_llm_jobs)
                 
                 unassigned_other = []
