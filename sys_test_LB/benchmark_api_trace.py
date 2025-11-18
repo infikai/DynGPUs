@@ -103,7 +103,7 @@ async def benchmark(
         return result
 
     # Main benchmark loop
-    conn = aiohttp.TCPConnector(limit=None)
+    conn = aiohttp.TCPConnector(limit=None, force_close=True)
     async with aiohttp.ClientSession(connector=conn) as session:
         benchmark_start_time = time.perf_counter()
         tasks: List[asyncio.Task] = []
