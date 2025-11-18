@@ -27,9 +27,9 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 5 # History for absolute load smoothing
-DELTA_HISTORY_SIZE = 3 # NEW: History for delta smoothing (15 seconds total)
-SMOOTHED_DELTA_TRIGGER = 0.20 # NEW: Scale up if the average delta over the history window is > 20%
+LOAD_HISTORY_SIZE = 5 
+DELTA_HISTORY_SIZE = 5 # <-- UPDATED: Increased delta history size for longer lookback (25 seconds)
+MEDIAN_DELTA_TRIGGER = 0.25 # <-- NEW: Using median, threshold increased to 25% (less aggressive)
 # ---------------------------------------------------
 
 
@@ -116,7 +116,7 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
     print("\nUpdating Nginx configuration...")
     
     server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
-    upstream_config = "        least_conn;\n" + "".join(server_lines)
+    upstream_config = "        \n" + "".join(server_lines)
     
     try:
         with open(NGINX_TEMPLATE_PATH, "r") as f: 
@@ -291,25 +291,26 @@ async def log_active_servers():
 async def autoscaler_task():
     """
     The main autoscaler loop that polls server metrics and triggers scaling.
-    Uses smoothed load (history) for steady-state scaling and smoothed delta for anticipatory scaling.
+    Uses smoothed load (history) for steady-state scaling and median delta for anticipatory scaling.
     """
     print("🚀 Autoscaler started...")
     last_scaling_time = 0
     load_history = []
-    delta_history = [] # NEW: History buffer for delta
+    delta_history = []
     last_total_load = 0
     
     async with httpx.AsyncClient() as client:
         while True:
             await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
-            active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
-            if not active_servers: continue
+            
+            active_servers_for_metrics = [s for s in ALL_SERVERS if s['status'] == 'active']
+            if not active_servers_for_metrics: continue
 
-            metric_tasks = [get_server_metrics(server, client) for server in active_servers]
+            metric_tasks = [get_server_metrics(server, client) for server in active_servers_for_metrics]
             metric_results = await asyncio.gather(*metric_tasks)
 
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
-            instantaneous_avg_load = total_load / len(active_servers)
+            instantaneous_avg_load = total_load / len(active_servers_for_metrics)
 
             # --- Load Averaging (Absolute Load) ---
             load_history.append(instantaneous_avg_load)
@@ -319,34 +320,31 @@ async def autoscaler_task():
             
             # --- DELTA Calculation and Smoothing ---
             load_delta = total_load - last_total_load
-            # Calculate instantaneous percentage change
             percent_change = load_delta / last_total_load if last_total_load > 0 else 0
             
-            # Update delta history buffer (only tracking positive acceleration)
+            # Use median for smoothing: track positive changes over the history window
             delta_history.append(percent_change if percent_change > 0 else 0)
             if len(delta_history) > DELTA_HISTORY_SIZE:
                 delta_history.pop(0)
             
-            # Calculate the average positive delta over the history window
-            smoothed_delta = np.mean(delta_history) if delta_history else 0
+            # Calculate the median positive delta
+            median_delta = np.median(delta_history) if delta_history else 0
             
             
-            print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers)} | Smoothed Avg: {smoothed_avg_load:.2f} | Smoothed Δ: {smoothed_delta:.0%}", end="")
+            print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers_for_metrics)} | Smoothed Avg: {smoothed_avg_load:.2f} | Median Δ: {median_delta:.0%}", end="")
 
             
             # --- DECISION LOGIC ---
 
-            # 1. Smoothed Delta Trigger (Anticipatory Scaling - overrides cooldown)
-            # Check for sustained, rapid acceleration. Requires at least 2 servers to prevent noise issues.
-            if smoothed_delta > SMOOTHED_DELTA_TRIGGER and len(active_servers) >= 2:
-                # Scale proportional to the degree of acceleration (smoothed_delta)
-                num_to_scale = max(1, int(len(active_servers) * smoothed_delta))
+            # 1. Median Delta Trigger (Anticipatory Scaling - overrides cooldown)
+            if median_delta > MEDIAN_DELTA_TRIGGER and len(active_servers_for_metrics) >= 2:
+                # Scale proportional to the median acceleration
+                num_to_scale = max(1, int(len(active_servers_for_metrics) * median_delta))
                 
-                print(f" (🚀 SMOOTHED DELTA SCALE UP by {num_to_scale} servers, Smoothed Δ: {smoothed_delta:.0%})")
+                print(f" (🚀 MEDIAN DELTA SCALE UP by {num_to_scale} servers, Median Δ: {median_delta:.0%})")
                 if await scale_up(count=num_to_scale):
-                    # Clear history to account for the new capacity quickly
                     load_history = [] 
-                    delta_history = [] # Reset delta history as well
+                    delta_history = []
                     last_scaling_time = time.time()
                 
             
@@ -354,18 +352,16 @@ async def autoscaler_task():
             elif (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
                 if smoothed_avg_load < SCALE_DOWN_THRESHOLD:
-                    # Scale down proportional to the deviation below the threshold
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
-                    num_to_scale = max(1, int(len(active_servers) * deviation))
+                    num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
                     print(f" (Scaling Down by {num_to_scale} servers, Smoothed Load: {smoothed_avg_load:.2f})")
                     if await scale_down(count=num_to_scale): 
                         last_scaling_time = time.time()
                         
                 elif smoothed_avg_load > SCALE_UP_THRESHOLD:
-                    # Scale up proportional to the deviation above the threshold
                     deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
-                    num_to_scale = max(1, int(len(active_servers) * deviation))
+                    num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
                     print(f" (Scaling Up by {num_to_scale} servers, Smoothed Load: {smoothed_avg_load:.2f})")
                     if await scale_up(count=num_to_scale): 
