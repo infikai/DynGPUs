@@ -120,53 +120,57 @@ class Scheduler:
         job.gpus_needed = gpus_needed
         job.max_allowable_duration = job.ideal_duration * self.end_time_threshold
 
-        # 1. Find Strictly Idle Training GPUs (Immediate use)
-        #    (Also include empty LLM servers in Training pool - they are effectively idle)
-        idle_gpus = []
-        for g in self.cluster.training_pool:
-            if g.is_idle():
-                idle_gpus.append(g)
-            elif g.is_llm_server and not g.running_tasks:
-                # Immediate reclaim of empty server
-                g.revert_from_llm_server()
-                idle_gpus.append(g)
-
-        # 2. Find "Occupied" Training GPUs (Running LLM -> Can be drained)
-        #    Only consider those NOT already mapped to another job
-        occupied_gpus = [g for g in self.cluster.find_non_idle_training_gpus_for_reclamation() 
-                         if g.gpu_id not in self.preemption_map]
-
-        total_potential = len(idle_gpus) + len(occupied_gpus)
+        # --- 1. Find IMMEDIATE Resources ---
         
-        # We allow starting if we can eventually satisfy the request
+        # A: Idle GPUs in Training Pool (Prioritize Own Pool)
+        train_idle = []
+        for g in self.cluster.training_pool:
+            if g.is_idle(): 
+                train_idle.append(g)
+            elif g.is_llm_server and not g.running_tasks:
+                g.revert_from_llm_server()
+                train_idle.append(g)
+        
+        # B: Idle GPUs in Inference Pool (Borrow)
+        #    (Includes strictly idle AND empty LLM servers)
+        infer_borrow = []
+        for g in self.cluster.find_idle_resources_in_inference_pool():
+            if g.is_llm_server:
+                g.revert_from_llm_server() # Must revert to be used for training
+            infer_borrow.append(g)
+            
+        # Combine Immediate (Prioritize TrainPool then InferPool)
+        immediate_gpus = train_idle + infer_borrow
+
+        # --- 2. Find DRAINABLE Resources ---
+        #    (Only check Training Pool squatters. We do NOT drain Inference jobs 
+        #     from the Inference Pool for Training jobs.)
+        drainable_gpus = [g for g in self.cluster.find_non_idle_training_gpus_for_reclamation() 
+                          if g.gpu_id not in self.preemption_map]
+
+        total_potential = len(immediate_gpus) + len(drainable_gpus)
+        
+        # --- 3. Dispatch Logic ---
         if total_potential >= gpus_needed:
             
-            # A. Determine how many we need to drain
-            num_to_assign_now = min(len(idle_gpus), gpus_needed)
+            num_to_assign_now = min(len(immediate_gpus), gpus_needed)
             num_to_drain = gpus_needed - num_to_assign_now
             
-            # B. Assign available idle GPUs
-            gpus_to_start = idle_gpus[:num_to_assign_now]
+            gpus_to_start = immediate_gpus[:num_to_assign_now]
             
-            # C. Mark others as draining
+            # If we need to drain, pick from the drainable list
             if num_to_drain > 0:
-                gpus_draining = occupied_gpus[:num_to_drain]
+                gpus_draining = drainable_gpus[:num_to_drain]
                 for gpu in gpus_draining:
                     gpu.drain_at_time = self.clock.current_time
                     self.preemption_map[gpu.gpu_id] = job
-                    # print(f"⚠️ Clock {self.clock.current_time}: Marked {gpu.gpu_id} as draining for Job {job.id}")
 
-            # D. Start job (Partial or Full)
             if gpus_to_start:
                 job.assign_resources(gpus_to_start, self.clock.current_time)
                 self.running_jobs.append(job)
-                # print(f"🚀 Clock {self.clock.current_time}: Started Job {job.id} with {len(gpus_to_start)}/{gpus_needed} GPUs (Waiting for {num_to_drain} to drain).")
                 return True
             else:
-                # Case: All needed GPUs are currently occupied.
-                # We marked them as draining, but we can't "start" the job with 0 GPUs.
-                # It stays in pending. As GPUs free up, they will revert and be picked up
-                # by this job in subsequent ticks (via idle_gpus check).
+                # No immediate GPUs, but we initiated draining. Job waits in pending.
                 return False
 
         return False

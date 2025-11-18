@@ -50,6 +50,13 @@ class ClusterManager:
         """
         return [g for g in self.training_pool if g.is_llm_server and g.running_tasks]
 
+    def find_idle_resources_in_inference_pool(self):
+        """
+        Returns GPUs in the Inference Pool that are effectively idle 
+        (either strictly idle or empty LLM servers).
+        """
+        return [g for g in self.inference_pool if g.is_idle() or (g.is_llm_server and not g.running_tasks)]
+
     def find_gpu_for_llm_job(self, current_time):
         for gpu in self.inference_pool:
             if gpu.is_available_for_llm(current_time):
