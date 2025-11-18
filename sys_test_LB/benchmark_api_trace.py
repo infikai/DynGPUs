@@ -12,16 +12,14 @@ import numpy as np
 
 
 # --- Global Configuration ---
-STAGE_DURATION_SECONDS = 600  # 10 minutes per stage
+STAGE_DURATION_SECONDS = 300  # 10 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1 (Low Load)": 10,  # 10 RPS
-    "Stage 2 (Medium Load)": 50, # 30 RPS
-    "Stage 3 (High Load)": 70,  # 50 RPS
+    "Stage 2 (Medium Load)": 70, # 30 RPS
+    "Stage 3 (High Load)": 20,  # 50 RPS
+    "Stage 3 (High Load)": 60,  # 50 RPS
     "Stage 3 (High Load)": 30,  # 50 RPS
     "Stage 3 (High Load)": 50,  # 50 RPS
-    "Stage 3 (High Load)": 20,  # 50 RPS
-    "Stage 3 (High Load)": 80,  # 50 RPS
-    "Stage 3 (High Load)": 5,  # 50 RPS
 }
 
 
