@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser.add_argument("csv_file", type=str, help="Path to the CSV file containing the job workload.")
     parser.add_argument("--llm-trace", type=str, help="Path to the CSV file with LLM inference requests.")
     parser.add_argument("--progress-interval", type=int, default=1000, help="Interval for printing progress to console.")
-    parser.add_argument("--log-interval", type=int, default=500, help="Interval for logging GPU usage to file.")
+    parser.add_argument("--log-interval", type=int, default=100, help="Interval for logging GPU usage to file.")
     # parser.add_argument("--policy-interval", type=int, default=500, help="Interval for checking the dynamic locking policy.")
     parser.add_argument("--start-time", type=int, default=0, help="Simulation start time.")
     parser.add_argument("--end-time", type=int, default=-1, help="Simulation end time.")
