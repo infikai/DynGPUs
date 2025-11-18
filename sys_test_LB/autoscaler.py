@@ -20,19 +20,20 @@ SCALE_UP_THRESHOLD = 45
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 60
-MONITOR_INTERVAL_SECONDS = 5  # <--- UPDATED: Increased from 2 to 5 seconds
+MONITOR_INTERVAL_SECONDS = 5
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 5000
 GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
-# --- Unaggressive Scaling Parameters ---
-LOAD_HISTORY_SIZE = 15 # Monitor average load over the last 15 intervals (75 seconds total)
-# ---------------------------------------
+# --- Unaggressive/Anticipatory Scaling Parameters ---
+LOAD_HISTORY_SIZE = 5 # History for absolute load smoothing
+DELTA_HISTORY_SIZE = 3 # NEW: History for delta smoothing (15 seconds total)
+SMOOTHED_DELTA_TRIGGER = 0.20 # NEW: Scale up if the average delta over the history window is > 20%
+# ---------------------------------------------------
 
 
-# --- 🖥️ Server State Management ---
-# `rank` only exists for shared servers that are part of the training job.
+# --- 🖥️ Server State Management (Retained) ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
     {"host": "10.10.3.1", "port": 8000, "status": "sleeping", "rank": 8, "shared": True},
@@ -42,7 +43,7 @@ ALL_SERVERS = [
 ]
 
 
-# --- Helper Functions ---
+# --- Helper Functions (Retained) ---
 
 def read_active_workers() -> List[int]:
     """Reads the list of active training ranks from the file."""
@@ -74,7 +75,6 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
     command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id}"
     
     start_time = time.time()
-    # --- NEW: Polling loop with a timeout ---
     while (time.time() - start_time) < GPU_FREE_TIMEOUT_SECONDS:
         try:
             async with asyncssh.connect(server['host']) as conn:
@@ -83,19 +83,16 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
                 
                 print(f"\rRank {server['rank']} on {server['host']} is using {memory_used_mb} MiB of memory...", end="")
                 
-                # If memory is below the threshold, the GPU is free.
                 if memory_used_mb < GPU_MEMORY_FREE_THRESHOLD_MB:
                     print(f"\nGPU for rank {server['rank']} is now free.")
                     return True
             
-            # If not free, wait for the poll interval before checking again.
             await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
             
         except (asyncssh.Error, OSError, ValueError) as e:
             print(f"\nERROR: Failed to check GPU memory for rank {server['rank']}: {e}. Retrying...")
             await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
 
-    # --- NEW: This code runs if the while loop finishes (timeout) ---
     print(f"\nERROR: Timeout reached. GPU memory for rank {server['rank']} on {server['host']} was not freed in time.")
     return False
 
@@ -115,17 +112,10 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
     return {"running": running, "waiting": waiting}
 
 async def update_nginx_config(active_servers: List[Dict]) -> bool:
-    """
-    Generates and writes a new nginx.conf from a template.
-    
-    Uses the 'least_conn' directive to balance load based on active connections.
-    """
+    """Generates and writes a new nginx.conf from a template."""
     print("\nUpdating Nginx configuration...")
     
-    # Create a list of server lines
     server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
-    
-    # Prepend the 'least_conn' directive to the server list
     upstream_config = "        least_conn;\n" + "".join(server_lines)
     
     try:
@@ -133,7 +123,6 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
             template = f.read()
             
         with open(NGINX_CONF_PATH, "w") as f: 
-            # Replace the placeholder with the full upstream config
             f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
             
         print(f"Nginx config updated with {len(active_servers)} active servers (using 'least_conn').")
@@ -162,7 +151,7 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
     except httpx.RequestError as e:
         print(f"\nERROR: Could not send command to server {server['host']}:{server['port']}: {e}")
 
-# --- Scaling Logic (Unchanged from last step) ---
+# --- Scaling Logic ---
 
 async def scale_down(count: int) -> bool:
     """
@@ -170,11 +159,9 @@ async def scale_down(count: int) -> bool:
     """
     start_time = time.time()
     
-    # --- Step 1: Select which servers to scale down ---
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     shared_active_servers = [s for s in active_servers if s['shared']]
     
-    # Determine how many servers can actually be removed
     max_possible_to_remove = len(active_servers) - MIN_ACTIVE_SERVERS
     actual_count = min(count, len(shared_active_servers), max_possible_to_remove)
     
@@ -182,25 +169,20 @@ async def scale_down(count: int) -> bool:
         print("\nScale-down skipped: No shared servers available to scale down or minimum would be breached.")
         return False
 
-    # The list of servers that will be shut down
     servers_to_scale_down = shared_active_servers[:actual_count]
     
-    # --- Step 2: Remove servers from Nginx load balancer ---
     for server in servers_to_scale_down:
         server['status'] = 'sleeping'
     
     new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     if not await update_nginx_config(new_active_servers):
-        # Revert status on failure
         for server in servers_to_scale_down:
             server['status'] = 'active'
         return False
     reload_nginx()
     
-    # --- Step 3: Concurrently wait for each server to be idle, then put it to sleep ---
     async with httpx.AsyncClient() as client:
         async def wait_and_sleep(s):
-            """Helper to handle graceful shutdown for one server."""
             print(f"\nGracefully shutting down shared server {s['host']}:{s['port']}...")
             wait_start_time = time.time()
             while (time.time() - wait_start_time) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
@@ -216,7 +198,6 @@ async def scale_down(count: int) -> bool:
 
         await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
 
-    # --- Step 4: Update the training job file in a single batch operation ---
     ranks_to_add = [s['rank'] for s in servers_to_scale_down]
     print(f"\nAdding ranks {ranks_to_add} back to the training job...")
     active_ranks = read_active_workers()
@@ -225,7 +206,6 @@ async def scale_down(count: int) -> bool:
             active_ranks.append(rank)
     write_active_workers(active_ranks)
     
-    # --- Step 5: Log the total duration of the event ---
     total_duration = time.time() - start_time
     log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_DOWN: Full scale-down of {actual_count} shared server(s) took {total_duration:.2f}s.\n"
     with open(SERVER_COUNT_LOG_FILE, "a") as f:
@@ -243,10 +223,7 @@ async def scale_up(count: int) -> bool:
     dedicated_sleeping = [s for s in all_sleeping if not s['shared']]
     shared_sleeping = [s for s in all_sleeping if s['shared']]
 
-    # --- Sort shared servers to prioritize the highest rank first ---
     shared_sleeping.sort(key=lambda s: s['rank'], reverse=True)
-    
-    # The final priority list: dedicated servers, then shared servers by highest rank
     servers_to_consider = dedicated_sleeping + shared_sleeping
     
     actual_count = min(count, len(servers_to_consider))
@@ -255,7 +232,6 @@ async def scale_up(count: int) -> bool:
         return False
         
     servers_to_wake = servers_to_consider[:actual_count]
-    
     successfully_woken = []
     
     shared_servers_to_wake = [s for s in servers_to_wake if s['shared']]
@@ -267,21 +243,18 @@ async def scale_up(count: int) -> bool:
         new_active_ranks = [r for r in original_active_ranks if r not in ranks_to_remove]
         write_active_workers(new_active_ranks)
         
-        # Pre-check memory for all shared servers before proceeding
         memory_checks = await asyncio.gather(*[check_gpu_memory_is_free(s) for s in shared_servers_to_wake])
         if not all(memory_checks):
             print("ERROR: GPU memory check failed for one or more servers. Aborting scale-up and reverting training file.")
-            write_active_workers(original_active_ranks) # Revert
+            write_active_workers(original_active_ranks)
             return False
 
-    # --- Step 3: Proceed to wake up all selected servers individually ---
     for server in servers_to_wake:
         await set_server_sleep_state(server, sleep=False)
         server['status'] = 'active'
         successfully_woken.append(server)
 
     if not successfully_woken:
-        # If we failed to wake any servers but modified the training file, revert it
         if shared_servers_to_wake:
              write_active_workers(original_active_ranks)
         return False
@@ -292,7 +265,6 @@ async def scale_up(count: int) -> bool:
         with open(SERVER_COUNT_LOG_FILE, "a") as f: f.write(log_entry)
         return True
     
-    # Revert logic if Nginx fails
     print("ERROR: Nginx update failed. Reverting...")
     for server in successfully_woken:
         server['status'] = 'sleeping'
@@ -317,12 +289,15 @@ async def log_active_servers():
         await asyncio.sleep(5)
 
 async def autoscaler_task():
-    """The main autoscaler loop that polls server metrics and triggers scaling."""
+    """
+    The main autoscaler loop that polls server metrics and triggers scaling.
+    Uses smoothed load (history) for steady-state scaling and smoothed delta for anticipatory scaling.
+    """
     print("🚀 Autoscaler started...")
     last_scaling_time = 0
-    
-    # --- Initialize the load history buffer ---
     load_history = []
+    delta_history = [] # NEW: History buffer for delta
+    last_total_load = 0
     
     async with httpx.AsyncClient() as client:
         while True:
@@ -336,46 +311,73 @@ async def autoscaler_task():
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
             instantaneous_avg_load = total_load / len(active_servers)
 
-            # --- Update and calculate smoothed load ---
+            # --- Load Averaging (Absolute Load) ---
             load_history.append(instantaneous_avg_load)
             if len(load_history) > LOAD_HISTORY_SIZE:
-                load_history.pop(0) # Remove the oldest entry
-            
-            # Calculate the smoothed load
+                load_history.pop(0)
             smoothed_avg_load = np.mean(load_history)
+            
+            # --- DELTA Calculation and Smoothing ---
+            load_delta = total_load - last_total_load
+            # Calculate instantaneous percentage change
+            percent_change = load_delta / last_total_load if last_total_load > 0 else 0
+            
+            # Update delta history buffer (only tracking positive acceleration)
+            delta_history.append(percent_change if percent_change > 0 else 0)
+            if len(delta_history) > DELTA_HISTORY_SIZE:
+                delta_history.pop(0)
+            
+            # Calculate the average positive delta over the history window
+            smoothed_delta = np.mean(delta_history) if delta_history else 0
+            
+            
+            print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers)} | Smoothed Avg: {smoothed_avg_load:.2f} | Smoothed Δ: {smoothed_delta:.0%}", end="")
 
-            print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers)} | Instantaneous Avg Load/Server: {instantaneous_avg_load:.2f} | Smoothed Avg: {smoothed_avg_load:.2f}", end="")
-            # -----------------------------------------------
+            
+            # --- DECISION LOGIC ---
 
-            if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
-
-            # --- Unaggressive Scaling Logic using smoothed_avg_load ---
-            if smoothed_avg_load < SCALE_DOWN_THRESHOLD:
-                # Calculate deviation as a percentage of the threshold
-                deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
-                # Scale proportional to the deviation, minimum 1
-                num_to_scale = max(1, int(len(active_servers) * deviation))
+            # 1. Smoothed Delta Trigger (Anticipatory Scaling - overrides cooldown)
+            # Check for sustained, rapid acceleration. Requires at least 2 servers to prevent noise issues.
+            if smoothed_delta > SMOOTHED_DELTA_TRIGGER and len(active_servers) >= 2:
+                # Scale proportional to the degree of acceleration (smoothed_delta)
+                num_to_scale = max(1, int(len(active_servers) * smoothed_delta))
                 
-                print(f" (Scaling Down by {num_to_scale} servers, Smoothed Load: {smoothed_avg_load:.2f})")
-                if await scale_down(count=num_to_scale): 
+                print(f" (🚀 SMOOTHED DELTA SCALE UP by {num_to_scale} servers, Smoothed Δ: {smoothed_delta:.0%})")
+                if await scale_up(count=num_to_scale):
+                    # Clear history to account for the new capacity quickly
+                    load_history = [] 
+                    delta_history = [] # Reset delta history as well
                     last_scaling_time = time.time()
+                
+            
+            # 2. Absolute Threshold Trigger (Normal Scaling - respects cooldown)
+            elif (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
+                
+                if smoothed_avg_load < SCALE_DOWN_THRESHOLD:
+                    # Scale down proportional to the deviation below the threshold
+                    deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
+                    num_to_scale = max(1, int(len(active_servers) * deviation))
                     
-            elif smoothed_avg_load > SCALE_UP_THRESHOLD:
-                # Calculate deviation as a percentage of the threshold
-                deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
-                # Scale proportional to the deviation, minimum 1
-                num_to_scale = max(1, int(len(active_servers) * deviation))
-                
-                print(f" (Scaling Up by {num_to_scale} servers, Smoothed Load: {smoothed_avg_load:.2f})")
-                if await scale_up(count=num_to_scale): 
-                    last_scaling_time = time.time()
-            # -----------------------------------------------------------------
+                    print(f" (Scaling Down by {num_to_scale} servers, Smoothed Load: {smoothed_avg_load:.2f})")
+                    if await scale_down(count=num_to_scale): 
+                        last_scaling_time = time.time()
+                        
+                elif smoothed_avg_load > SCALE_UP_THRESHOLD:
+                    # Scale up proportional to the deviation above the threshold
+                    deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
+                    num_to_scale = max(1, int(len(active_servers) * deviation))
+                    
+                    print(f" (Scaling Up by {num_to_scale} servers, Smoothed Load: {smoothed_avg_load:.2f})")
+                    if await scale_up(count=num_to_scale): 
+                        last_scaling_time = time.time()
+                        
+            # --- END OF CYCLE ---
+            last_total_load = total_load
+
 
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    # The initial Nginx config update must use the current status of all defined servers
-    # It seems your ALL_SERVERS list currently has one 'active' server, so Nginx will start there.
     if update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
 
