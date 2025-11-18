@@ -135,7 +135,7 @@ class Scheduler:
                 job.assigned_gpus = [gpu]
                 
                 # --- (NEW: Log delay on job start) ---
-                delay = max(0, job.start_time - job.arrival_time)
+                delay = math.floor(max(0, job.start_time - job.arrival_time))
                 self.current_inference_delays.append(delay)
                 
                 gpu.assign_llm_task(job) 
