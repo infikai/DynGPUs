@@ -122,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument("--tick-duration", type=int, default=1, help="The duration of each simulation time step (tick).")
     
     # ** NEW: Add argument for training job end-time threshold **
-    parser.add_argument("--end-time-threshold", type=float, default=1.5, 
+    parser.add_argument("--end-time-threshold", type=float, default=2, 
                         help="Multiplier for training job ideal duration (e.g., 1.2 means 20%% slack) for preemption.")
     
     args = parser.parse_args()
