@@ -33,10 +33,10 @@ class Scheduler:
         self.current_inference_delays = [] # Stores delays for jobs completed in the interval
 
         # Initialize log files
-        self.training_log_file = open("training_job_log.csv", "w")
+        self.training_log_file = open("training_job_log_hvd.csv", "w")
         # --- (MODIFIED: Changed from inference_job_log to inference_delay_log) ---
-        self.inference_delay_log_file = open("inference_delay_log.csv", "w")
-        self.usage_log_file = open("gpu_usage_log.csv", "w")
+        self.inference_delay_log_file = open("inference_delay_log_hvd.csv", "w")
+        self.usage_log_file = open("gpu_usage_log_hvd.csv", "w")
         self._initialize_logs()
 
     def _initialize_logs(self):
