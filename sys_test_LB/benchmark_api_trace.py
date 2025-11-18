@@ -61,8 +61,8 @@ async def benchmark(
 ):
     """Main benchmark function to send HTTP requests based on trace file."""
     
-    async def process_request(session: aiohttp.ClientSession, request: Request) -> RequestResult:
-        """Coroutine to send one HTTP request and capture detailed timestamps."""
+    # MOVED: process_request now handles its own session creation
+    async def process_request(request: Request) -> RequestResult:
         result = RequestResult(request_id=request.request_id, success=False, output_len=0)
         
         payload = {
@@ -75,22 +75,28 @@ async def benchmark(
         result.start_time = time.perf_counter()
         generated_tokens = 0
         
+        # --- MODIFICATION START ---
+        # Create a fresh connector and session for EVERY request.
+        # enable_cleanup_closed=True helps clean up the socket immediately.
+        connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
+        
         try:
-            async with session.post(url=api_url, json=payload) as response:
-                if response.status != 200:
-                    print(f"Error: Request {request.request_id} failed with status {response.status}")
-                    result.end_time = time.perf_counter()
-                    return result
-                
-                first_token_received = False
-                async for chunk in response.content.iter_any():
-                    token_time = time.perf_counter()
-                    if not first_token_received:
-                        result.first_token_time = token_time
-                        first_token_received = True
-                    result.token_timestamps.append(token_time)
-                    if chunk.strip():
-                        generated_tokens += 1
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post(url=api_url, json=payload) as response:
+                    if response.status != 200:
+                        print(f"Error: Request {request.request_id} failed with status {response.status}")
+                        result.end_time = time.perf_counter()
+                        return result
+                    
+                    first_token_received = False
+                    async for chunk in response.content.iter_any():
+                        token_time = time.perf_counter()
+                        if not first_token_received:
+                            result.first_token_time = token_time
+                            first_token_received = True
+                        result.token_timestamps.append(token_time)
+                        if chunk.strip():
+                            generated_tokens += 1
 
             result.end_time = time.perf_counter()
             result.output_len = generated_tokens
@@ -99,32 +105,32 @@ async def benchmark(
         except aiohttp.ClientError as e:
             print(f"Error processing request {request.request_id}: {e}")
             result.end_time = time.perf_counter()
-
+        
         return result
+        # --- MODIFICATION END ---
 
     # Main benchmark loop
-    conn = aiohttp.TCPConnector(limit=None, force_close=True)
-    async with aiohttp.ClientSession(connector=conn) as session:
-        benchmark_start_time = time.perf_counter()
-        tasks: List[asyncio.Task] = []
+    # REMOVED: global session context manager
+    benchmark_start_time = time.perf_counter()
+    tasks: List[asyncio.Task] = []
 
-        print("Dispatching requests...")
-        for request in requests:
-            if duration is not None and (time.perf_counter() - benchmark_start_time) >= duration:
-                print(f"\nBenchmark duration of {duration}s reached. No more requests will be sent.")
-                break
+    print("Dispatching requests...")
+    for request in requests:
+        if duration is not None and (time.perf_counter() - benchmark_start_time) >= duration:
+            print(f"\nBenchmark duration of {duration}s reached. No more requests will be sent.")
+            break
 
-            current_time = time.perf_counter() - benchmark_start_time
-            time_to_wait = request.timestamp - current_time
-            if time_to_wait > 0:
-                await asyncio.sleep(time_to_wait)
-                
-            task = asyncio.create_task(process_request(session, request))
-            tasks.append(task)
-        print("All requests have been dispatched. Waiting for completion...")
+        current_time = time.perf_counter() - benchmark_start_time
+        time_to_wait = request.timestamp - current_time
+        if time_to_wait > 0:
+            await asyncio.sleep(time_to_wait)
+            
+        task = asyncio.create_task(process_request(request)) # Removed session arg
+        tasks.append(task)
+    print("All requests have been dispatched. Waiting for completion...")
 
-        results = await asyncio.gather(*tasks)
-        return results
+    results = await asyncio.gather(*tasks)
+    return results
 
 
 def calculate_metrics(
