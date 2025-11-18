@@ -281,3 +281,48 @@ class Scheduler:
         self.usage_log_file.close()
         self.inference_delay_log_file.close()
         print("Simulation Complete. Results saved.")
+
+        with open("simulation_summary.txt", "w") as summary_file:
+            total_jobs = len(self.completed_jobs)
+            if total_jobs == 0:
+                summary_text = "No jobs were completed in the simulation window."
+                print(summary_text)
+                summary_file.write(summary_text + "\n")
+                return
+
+            training_jobs = [j for j in self.completed_jobs if j.job_type == 'training']
+            inference_jobs = [j for j in self.completed_jobs if j.job_type == 'inference']
+            llm_inference_jobs = [j for j in self.completed_jobs if j.job_type == 'llm_inference']
+            
+            # Combine regular and LLM inference for the average
+            all_inference_jobs = inference_jobs + llm_inference_jobs
+            
+            avg_training_turnaround = sum(j.turnaround_time for j in training_jobs) / len(training_jobs) if training_jobs else 0
+            avg_inference_turnaround = sum(j.turnaround_time for j in all_inference_jobs) / len(all_inference_jobs) if all_inference_jobs else 0
+            
+            # --- (NEW: Calculate average delays) ---
+            avg_training_delay = sum(j.start_time - j.arrival_time for j in training_jobs if j.start_time != -1) / len(training_jobs) if training_jobs else 0
+            avg_inference_delay = sum(j.start_time - j.arrival_time for j in all_inference_jobs if j.start_time != -1) / len(all_inference_jobs) if all_inference_jobs else 0
+
+            # Build the output lines
+            lines = [
+                "--- Simulation Results ---",
+                # --- (MODIFIED: Updated log file name in message) ---
+                f"Detailed logs saved to 'training_job_log.csv', 'inference_delay_log.csv', and 'gpu_usage_log.csv'",
+                f"Total Jobs Completed: {total_jobs}",
+                # --- (REMOVED preemption/reclamation lines) ---
+                # f"Total Preemptions: {self.preemption_count}",
+                # f"Total Successful Reclamations: {self.reclamation_count}",
+                f"Average Training Job Turnaround: {avg_training_turnaround:.2f} seconds",
+                f"Average Inference Job Turnaround: {avg_inference_turnaround:.2f} seconds",
+                # --- (NEW: Report average delays) ---
+                f"Average Training Job Delay (Queue Time): {avg_training_delay:.2f} seconds",
+                f"Average Inference Job Delay (Queue Time): {avg_inference_delay:.2f} seconds",
+                "--------------------------"
+            ]
+
+            # Print to console and write to the summary file
+            for line in lines:
+                print(line)
+                summary_file.write(line + "\n")
+                

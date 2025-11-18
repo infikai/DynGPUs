@@ -8,8 +8,8 @@ from components import Job
 import time
 
 # --- NEW: Define Pool Sizes ---
-TRAINING_POOL_SIZE = 1000
-INFERENCE_POOL_SIZE = 300
+TRAINING_POOL_SIZE = 600
+INFERENCE_POOL_SIZE = 500
 
 def load_jobs_from_csv(file_path):
     # (Same as before)
