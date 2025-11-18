@@ -12,26 +12,48 @@ TRAINING_POOL_SIZE = 600
 INFERENCE_POOL_SIZE = 500
 
 def load_jobs_from_csv(file_path):
-    # (Same as before)
+    """
+    Loads job definitions from a specified CSV file and counts job types.
+    """
+    print(f"Loading jobs from {file_path}...")
     try:
         df = pd.read_csv(file_path)
     except FileNotFoundError:
+        print(f"Error: The file '{file_path}' was not found.")
         return []
+
     jobs = []
+    # ** NEW: Initialize counters **
+    train_count = 0
+    inference_count = 0
+
+    df.rename(columns={
+        'start_time_t': 'arrival_time',
+        'runtime': 'base_duration',
+        'gpu_wrk_util': 'utilization_required',
+        'max_gpu_wrk_mem': 'memory_required'
+    }, inplace=True)
+
     for index, row in df.iterrows():
+        # Heuristic to determine job type
         if 'train' in str(row['task_group']).lower():
             job_type = 'training'
+            train_count += 1 # Increment training counter
         else:
             job_type = 'inference'
-            
-        # Map columns based on your CSV structure
+            inference_count += 1 # Increment inference counter
+
         job = Job(id=f"job_{index}",
                   job_type=job_type,
-                  base_duration=row.get('duration', 100), # Handle missing columns gracefully
-                  arrival_time=row.get('submit_time', 0),
-                  memory_required=row.get('gpu_mem', 1),
-                  utilization_required=100)
+                  base_duration=row['base_duration'],
+                  arrival_time=row['arrival_time'],
+                  memory_required=row['memory_required'],
+                  utilization_required=row['utilization_required'])
         jobs.append(job)
+        
+    print(f"Successfully loaded {len(jobs)} total jobs.")
+    # ** NEW: Print the counts **
+    print(f"➡️ Found {train_count} training jobs and {inference_count} inference jobs in the workload.")
     return jobs
 
 def load_llm_jobs_from_csv(file_path):
