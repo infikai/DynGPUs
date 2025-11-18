@@ -116,13 +116,13 @@ if __name__ == "__main__":
     parser.add_argument("--progress-interval", type=int, default=1000, help="Interval for printing progress to console.")
     parser.add_argument("--log-interval", type=int, default=500, help="Interval for logging GPU usage to file.")
     # ** REMOVED: policy-interval is no longer needed **
-    # parser.add_argument("--policy-interval", type=int, default=500, help="Interval for checking the dynamic locking policy.")
+    # parser.add_argument("--policy-interval", type=int, default=100, help="Interval for checking the dynamic locking policy.")
     parser.add_argument("--start-time", type=int, default=0, help="Simulation start time.")
     parser.add_argument("--end-time", type=int, default=-1, help="Simulation end time.")
     parser.add_argument("--tick-duration", type=int, default=1, help="The duration of each simulation time step (tick).")
     
     # ** NEW: Add argument for training job end-time threshold **
-    parser.add_argument("--end-time-threshold", type=float, default=1.3, 
+    parser.add_argument("--end-time-threshold", type=float, default=1.5, 
                         help="Multiplier for training job ideal duration (e.g., 1.2 means 20%% slack) for preemption.")
     
     args = parser.parse_args()

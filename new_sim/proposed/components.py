@@ -5,7 +5,7 @@ GPU_MEMORY_GB = 32
 GPU_UTILIZATION_PERCENT = 100
 PREEMPTION_OVERHEAD = 2
 RECLAMATION_OVERHEAD = 3
-PREEMPTION_COOLDOWN = 5
+PREEMPTION_COOLDOWN = 600
 LLM_POLICY_INTERVAL = 10 # Kept for scheduler log/progress interval, though policy is removed
 
 # --- REMOVED: Policy Constants ---
@@ -255,7 +255,7 @@ class Job:
         self.turnaround_time = self.completion_time - self.arrival_time
 
     # --- NEW: Method to check preemption threshold ---
-    def can_be_preempted(self, current_time, estimated_borrow_time=10.0):
+    def can_be_preempted(self, current_time, estimated_borrow_time=1000.0):
         """
         Predicts if a *future* preemption will violate the max end-time
         by checking past delays and adding future predicted delays.
