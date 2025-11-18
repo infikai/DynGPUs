@@ -120,13 +120,14 @@ class Scheduler:
         non_draining_servers_count = sum(1 for gpu in self.cluster.gpus 
                                          if gpu.is_llm_server and gpu.drain_at_time == -1)
         
-        # The knob: Only allow preemption if we are *already* over the target
-        # number of permanent (non-draining) servers.
-        allow_preemption = non_draining_servers_count > 300
+        # --- FIX IS HERE ---
+        # 1. Use self.cluster.target_llm_servers instead of 300
+        # 2. Use '>=' so preemption works as soon as the base cluster is full
+        allow_preemption = non_draining_servers_count >= self.cluster.target_llm_servers
 
         if allow_preemption:
             # --- Priority 2: Preempt "safe" training jobs ---
-            print(f"    [LLM Dispatch] P1 full. Knob active (Servers: {non_draining_servers_count} > Target: 300). Trying P2 (Preempt).")
+            print(f"    [LLM Dispatch] P1 full. Knob active (Servers: {non_draining_servers_count} >= Target: {self.cluster.target_llm_servers}). Trying P2 (Preempt).")
             while jobs_to_assign:
                 victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
                 if not victim_job:
@@ -149,7 +150,7 @@ class Scheduler:
                     victim_gpu.assign_llm_task(job) 
                     self.running_jobs.append(job)
         else:
-            print(f"    [LLM Dispatch] P1 full. Knob inactive (Servers: {non_draining_servers_count} <= Target: 300). Skipping P2.")
+            print(f"    [LLM Dispatch] P1 full. Knob inactive (Servers: {non_draining_servers_count} < Target: {self.cluster.target_llm_servers}). Skipping P2.")
             
         # --- END OF MODIFIED SECTION ---
 
