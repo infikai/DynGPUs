@@ -80,6 +80,8 @@ async def benchmark(
         # enable_cleanup_closed=True helps clean up the socket immediately.
         connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
         
+        custom_headers = {"Connection": "close"}
+
         try:
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.post(url=api_url, json=payload) as response:
