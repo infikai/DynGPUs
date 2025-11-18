@@ -196,7 +196,7 @@ class Scheduler:
                 self.preemption_count += 1
                 
                 # --- MODIFIED: Set drain timer ---
-                drain_time = self.clock.current_time + 100.0
+                drain_time = self.clock.current_time + 1000.0
                 victim_gpu.convert_to_llm_server(drain_at_time=drain_time)
                 gpu = victim_gpu
         
