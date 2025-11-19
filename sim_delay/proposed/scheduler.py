@@ -121,8 +121,9 @@ class Scheduler:
                     
                     job.assigned_gpus = [gpu]
                     job.start_time = self.clock.current_time
-                    delay = max(0, job.start_time - job.arrival_time)
-                    self.current_inference_delays.append(delay)
+                    delay = math.floor(max(0, job.start_time - job.arrival_time))
+                    if delay > 0:
+                        self.current_inference_delays.append(delay)
                     
                     gpu.assign_llm_task(job)
                     self.running_jobs.append(job)
