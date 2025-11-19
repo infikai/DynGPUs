@@ -97,7 +97,7 @@ if __name__ == "__main__":
     scheduler = Scheduler(job_workload, cluster, 
                           progress_interval=1000, log_interval=500,
                           start_time=args.start_time, end_time=args.end_time,
-                          tick_duration=1, end_time_threshold=1.2)
+                          tick_duration=1, end_time_threshold=1.5)
     
     scheduler.run_simulation()
     scheduler.print_results()

@@ -106,7 +106,7 @@ class Scheduler:
                     self.preemption_count += 1
                     
                     # Convert to LLM server and mark for draining later (when it gets reverted)
-                    victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 100)
+                    victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 1000)
                     gpu = victim_gpu
 
             if gpu:
@@ -150,47 +150,27 @@ class Scheduler:
                 train_idle.append(g)
         
         # B: Idle GPUs in Inference Pool (Borrow)
-        #    (Includes strictly idle AND empty LLM servers)
         infer_borrow = []
         for g in self.cluster.find_idle_resources_in_inference_pool():
             if g.is_llm_server:
-                g.revert_from_llm_server() # Must revert to be used for training
+                g.revert_from_llm_server() 
             infer_borrow.append(g)
             
         # Combine Immediate (Prioritize TrainPool then InferPool)
         immediate_gpus = train_idle + infer_borrow
-
-        # --- 2. Find DRAINABLE Resources ---
-        #    (Only check Training Pool squatters. We do NOT drain Inference jobs 
-        #     from the Inference Pool for Training jobs.)
-        drainable_gpus = [g for g in self.cluster.find_non_idle_training_gpus_for_reclamation() 
-                          if g.gpu_id not in self.preemption_map]
-
-        total_potential = len(immediate_gpus) + len(drainable_gpus)
         
-        # --- 3. Dispatch Logic ---
-        if total_potential >= gpus_needed:
+        # --- 2. Dispatch Logic (Only Full Assignment) ---
+        total_available = len(immediate_gpus)
+        
+        if total_available >= gpus_needed:
+            # We can satisfy the job entirely with immediate resources
+            gpus_to_start = immediate_gpus[:gpus_needed]
             
-            num_to_assign_now = min(len(immediate_gpus), gpus_needed)
-            num_to_drain = gpus_needed - num_to_assign_now
-            
-            gpus_to_start = immediate_gpus[:num_to_assign_now]
-            
-            # If we need to drain, pick from the drainable list
-            if num_to_drain > 0:
-                gpus_draining = drainable_gpus[:num_to_drain]
-                for gpu in gpus_draining:
-                    gpu.drain_at_time = self.clock.current_time
-                    self.preemption_map[gpu.gpu_id] = job
-
-            if gpus_to_start:
-                job.assign_resources(gpus_to_start, self.clock.current_time)
-                self.running_jobs.append(job)
-                return True
-            else:
-                # No immediate GPUs, but we initiated draining. Job waits in pending.
-                return False
-
+            job.assign_resources(gpus_to_start, self.clock.current_time)
+            self.running_jobs.append(job)
+            return True
+        
+        # Job must wait in pending
         return False
 
     def _handle_job_completion(self, job):

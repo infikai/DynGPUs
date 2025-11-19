@@ -199,20 +199,76 @@ class Job:
         self.completion_time = current_time
         self.turnaround_time = self.completion_time - self.arrival_time
 
-    def can_be_preempted(self, current_time, estimated_borrow_time=10.0):
-        if self.start_time == -1 or len(self.assigned_gpus) <= 1:
+    def can_be_preempted(self, current_time, estimated_borrow_time=1000.0):
+        """
+        Predicts if a *future* preemption will violate the max end-time
+        by checking past delays and adding future predicted delays.
+        """
+        if self.start_time == -1:
+            return False # Job hasn't started
+        
+        # --- THIS IS THE FIX ---
+        current_num_gpus = len(self.assigned_gpus)
+        
+        # Can't preempt if the job is already down to its last GPU
+        if current_num_gpus <= 1:
             return False
             
+        # 1. Calculate delay *already incurred* based on simulation state.
         work_done_in_ideal_time = self.ideal_duration - self.remaining_work
         time_elapsed = current_time - self.start_time
         current_delay_incurred = max(0, time_elapsed - work_done_in_ideal_time)
 
+        # 2. Calculate *future* fixed overheads from this new preemption
         future_fixed_delay = PREEMPTION_OVERHEAD + RECLAMATION_OVERHEAD
-        
-        # Simplification for slowdown delay
-        slowdown_delay = estimated_borrow_time / len(self.assigned_gpus)
 
-        total_predicted_delay = current_delay_incurred + future_fixed_delay + slowdown_delay
+        # 3. Calculate *future* "Slowdown Penalty" based on *current* GPU count
+        
+        # The speed it's running at *right now*
+        current_speed_factor = current_num_gpus / self.gpus_needed
+        # The speed it *will* run at if we take one GPU
+        new_speed_factor = (current_num_gpus - 1) / self.gpus_needed
+
+        # Time it would take to finish all remaining work at the new, slower speed
+        time_to_finish_new_slow = self.remaining_work / new_speed_factor
+        
+        if time_to_finish_new_slow <= estimated_borrow_time:
+            # Case A: Job finishes *while* slow.
+            # We need the time it would have taken at the *current* speed.
+            time_to_finish_current = self.remaining_work / current_speed_factor
+            
+            # The delay is the difference
+            slowdown_delay = time_to_finish_new_slow - time_to_finish_current
+        
+        else:
+            # Case B: Job outlasts the borrow time.
+            # It runs at new_speed_factor for 'estimated_borrow_time'
+            # instead of current_speed_factor.
+            
+            # Work "lost" = (Time) * (Speed Difference)
+            work_lost = estimated_borrow_time * (current_speed_factor - new_speed_factor)
+            
+            # This "lost work" must be made up later,
+            # assuming it's at the current_speed_factor.
+            slowdown_delay = work_lost / current_speed_factor
+            
+            # --- Formula Simplification ---
+            # (current_speed_factor - new_speed_factor) = (1 / self.gpus_needed)
+            # work_lost = estimated_borrow_time / self.gpus_needed
+            # slowdown_delay = (estimated_borrow_time / self.gpus_needed) / (current_num_gpus / self.gpus_needed)
+            # slowdown_delay = estimated_borrow_time / current_num_gpus
+            # --- End Simplification ---
+            
+            # Using the simplified formula:
+            slowdown_delay = estimated_borrow_time / current_num_gpus
+
+
+        # 4. Calculate total *predicted* delay
+        total_predicted_delay = (current_delay_incurred + 
+                                 future_fixed_delay + 
+                                 slowdown_delay)
+        
+        # 5. Calculate max *allowable* delay
         max_allowable_delay = self.max_allowable_duration - self.ideal_duration
 
         return total_predicted_delay <= max_allowable_delay
