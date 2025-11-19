@@ -8,7 +8,7 @@ from components import Job
 import time
 
 # --- NEW: Define the target number of permanent LLM servers ---
-TARGET_LLM_SERVERS = 150
+TARGET_LLM_SERVERS = 10
 TOTAL_GPUS = 1300
 
 def load_jobs_from_csv(file_path):
