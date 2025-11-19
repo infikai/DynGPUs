@@ -10,14 +10,7 @@ class ClusterManager:
         self.target_llm_servers = target_llm_servers
         print(f"ClusterManager initialized with {num_gpus} total GPUs.")
 
-    def pre_warm_llm_servers(self):
-        """Converts the first 'target_llm_servers' GPUs into LLM servers at startup."""
-        servers_created = 0
-        for i in range(self.target_llm_servers):
-            if i < len(self.gpus):
-                self.gpus[i].convert_to_llm_server()
-                servers_created += 1
-        print(f"➡️ Successfully pre-warmed {servers_created} LLM servers.")
+    # --- REMOVED: pre_warm_llm_servers method ---
 
     def find_gpu_for_stackable_inference(self, job):
         """Finds a single non-LLM GPU that can fit a small inference job."""
@@ -35,7 +28,6 @@ class ClusterManager:
         
         Priority:
         1. Find an existing LLM server with available slots.
-        (Preemption and expansion are handled by the scheduler)
         """
         for gpu in self.gpus:
             # --- MODIFIED: Use new helper which checks drain time ---

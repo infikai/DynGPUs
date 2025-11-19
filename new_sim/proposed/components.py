@@ -6,19 +6,13 @@ GPU_UTILIZATION_PERCENT = 100
 PREEMPTION_OVERHEAD = 2
 RECLAMATION_OVERHEAD = 3
 PREEMPTION_COOLDOWN = 600
-LLM_POLICY_INTERVAL = 10 # Kept for scheduler log/progress interval, though policy is removed
-
-# --- REMOVED: Policy Constants ---
-# SHARABLE_GPU_MEM_PENALTY_GB = 1.5
-# HIGH_UTIL_THRESHOLD = 80.0
-# LOW_UTIL_THRESHOLD = 50.0
-# PARTIAL_LOCK_FRACTION = 0.1
+LLM_POLICY_INTERVAL = 10 
 
 # NEW: LLM Inference Performance Model Constants
-LLM_BASE_TTFT = 2.5          # Renamed: Base time to first token, independent of input
-LLM_TKN_PER_INPUT = 0.005    # New: Time (in seconds) to process each input token
-LLM_TPOT = 0.1               # Time Per Output Token (seconds)
-LLM_MAX_CONCURRENCY = 16      # Max concurrent requests per GPU
+LLM_BASE_TTFT = 2.5          
+LLM_TKN_PER_INPUT = 0.005    
+LLM_TPOT = 0.1               
+LLM_MAX_CONCURRENCY = 16      
 
 class SimulationClock:
     """A simple discrete-time simulation clock."""
@@ -43,12 +37,9 @@ class GPU:
         self.llm_slots_available = 0
         
         # --- NEW: Add drain timer attribute ---
-        # -1 means the GPU is not set to drain.
         self.drain_at_time = -1 
         
         self.running_tasks = {}
-
-    # --- REMOVED: apply_memory_penalty ---
 
     def can_fit(self, job):
         return (job.memory_required <= self.available_memory and
@@ -65,7 +56,7 @@ class GPU:
         self.available_utilization -= util_slice
         self.running_tasks[job.id] = {'job': job, 'mem': mem_slice, 'util': util_slice}
 
-    def convert_to_llm_server(self, drain_at_time=-1): # <-- MODIFIED
+    def convert_to_llm_server(self, drain_at_time=-1): 
         if self.is_llm_server or not self.is_idle():
             return False
         
@@ -73,7 +64,6 @@ class GPU:
         self.llm_slots_total = LLM_MAX_CONCURRENCY
         self.llm_slots_available = LLM_MAX_CONCURRENCY
         
-        # --- NEW: Set the drain time ---
         self.drain_at_time = drain_at_time
         
         self.available_memory = 0
@@ -88,7 +78,6 @@ class GPU:
         self.llm_slots_total = 0
         self.llm_slots_available = 0
         
-        # --- NEW: Reset the drain time ---
         self.drain_at_time = -1
         
         self.available_memory = self.total_memory
@@ -102,11 +91,11 @@ class GPU:
         if not self.is_llm_server or self.llm_slots_available <= 0:
             return False
         
-        # If a drain time is set, check if we are past it.
+        # If a drain time is set, check if we are past it (it's draining).
         if self.drain_at_time != -1 and current_time >= self.drain_at_time:
-            return False # This GPU is draining, do not assign new jobs.
+            return False 
             
-        return True # Has slots and is not draining.
+        return True 
 
     def assign_llm_task(self, job):
         if not self.is_llm_server or self.llm_slots_available <= 0:
@@ -163,7 +152,7 @@ class Job:
         
         # --- NEW: Tracking for end-time threshold ---
         self.ideal_duration = self.base_duration
-        self.max_allowable_duration = float('inf') # Default, will be set by scheduler
+        self.max_allowable_duration = float('inf') 
         
     def __repr__(self):
         return (f"<Job id={self.id} type={self.job_type} "
@@ -177,25 +166,17 @@ class Job:
         self._distribute_load()
 
     def _distribute_load(self):
-        # --- THIS IS THE FIX ---
-        # We must divide the total load by the *original* number of GPUs
-        # the job was scheduled for (gpus_needed), NOT the currently
-        # assigned number.
         num_gpus_originally_needed = self.gpus_needed
         
-        # If gpus_needed is 0 for some reason, we can't distribute load.
         if num_gpus_originally_needed == 0:
-            # Fallback to current number if gpus_needed isn't set,
-            # though gpus_needed should *always* be set by the scheduler.
             if len(self.assigned_gpus) > 0:
                 num_gpus_originally_needed = len(self.assigned_gpus)
             else:
-                return # Can't distribute load to 0 GPUs
+                return 
 
         mem_per_gpu = self.memory_required / num_gpus_originally_needed
         util_per_gpu = self.utilization_required / num_gpus_originally_needed
         
-        # Now, assign this *fixed* slice to each *currently available* GPU.
         for gpu in self.assigned_gpus:
             gpu.assign_task(self, mem_per_gpu, util_per_gpu)
 
@@ -261,9 +242,8 @@ class Job:
         by checking past delays and adding future predicted delays.
         """
         if self.start_time == -1:
-            return False # Job hasn't started
+            return False 
         
-        # --- THIS IS THE FIX ---
         current_num_gpus = len(self.assigned_gpus)
         
         # Can't preempt if the job is already down to its last GPU
@@ -280,44 +260,20 @@ class Job:
 
         # 3. Calculate *future* "Slowdown Penalty" based on *current* GPU count
         
-        # The speed it's running at *right now*
         current_speed_factor = current_num_gpus / self.gpus_needed
-        # The speed it *will* run at if we take one GPU
         new_speed_factor = (current_num_gpus - 1) / self.gpus_needed
 
-        # Time it would take to finish all remaining work at the new, slower speed
         time_to_finish_new_slow = self.remaining_work / new_speed_factor
         
         if time_to_finish_new_slow <= estimated_borrow_time:
             # Case A: Job finishes *while* slow.
-            # We need the time it would have taken at the *current* speed.
             time_to_finish_current = self.remaining_work / current_speed_factor
-            
-            # The delay is the difference
             slowdown_delay = time_to_finish_new_slow - time_to_finish_current
         
         else:
             # Case B: Job outlasts the borrow time.
-            # It runs at new_speed_factor for 'estimated_borrow_time'
-            # instead of current_speed_factor.
-            
-            # Work "lost" = (Time) * (Speed Difference)
-            work_lost = estimated_borrow_time * (current_speed_factor - new_speed_factor)
-            
-            # This "lost work" must be made up later,
-            # assuming it's at the current_speed_factor.
-            slowdown_delay = work_lost / current_speed_factor
-            
-            # --- Formula Simplification ---
-            # (current_speed_factor - new_speed_factor) = (1 / self.gpus_needed)
-            # work_lost = estimated_borrow_time / self.gpus_needed
-            # slowdown_delay = (estimated_borrow_time / self.gpus_needed) / (current_num_gpus / self.gpus_needed)
-            # slowdown_delay = estimated_borrow_time / current_num_gpus
-            # --- End Simplification ---
-            
-            # Using the simplified formula:
+            # Simplified formula for lost time: estimated_borrow_time / current_num_gpus
             slowdown_delay = estimated_borrow_time / current_num_gpus
-
 
         # 4. Calculate total *predicted* delay
         total_predicted_delay = (current_delay_incurred + 

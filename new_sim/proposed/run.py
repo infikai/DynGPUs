@@ -1,4 +1,4 @@
-# file: run_simulation.py
+# file: run.py
 
 import pandas as pd
 import argparse
@@ -8,7 +8,7 @@ from components import Job
 import time
 
 # --- NEW: Define the target number of permanent LLM servers ---
-TARGET_LLM_SERVERS = 300
+TARGET_LLM_SERVERS = 150
 TOTAL_GPUS = 1300
 
 def load_jobs_from_csv(file_path):
@@ -115,14 +115,12 @@ if __name__ == "__main__":
     parser.add_argument("--llm-trace", type=str, help="Path to the CSV file with LLM inference requests.")
     parser.add_argument("--progress-interval", type=int, default=1000, help="Interval for printing progress to console.")
     parser.add_argument("--log-interval", type=int, default=500, help="Interval for logging GPU usage to file.")
-    # ** REMOVED: policy-interval is no longer needed **
-    # parser.add_argument("--policy-interval", type=int, default=100, help="Interval for checking the dynamic locking policy.")
     parser.add_argument("--start-time", type=int, default=0, help="Simulation start time.")
     parser.add_argument("--end-time", type=int, default=-1, help="Simulation end time.")
     parser.add_argument("--tick-duration", type=int, default=1, help="The duration of each simulation time step (tick).")
     
     # ** NEW: Add argument for training job end-time threshold **
-    parser.add_argument("--end-time-threshold", type=float, default=2, 
+    parser.add_argument("--end-time-threshold", type=float, default=1.5, 
                         help="Multiplier for training job ideal duration (e.g., 1.2 means 20%% slack) for preemption.")
     
     args = parser.parse_args()
@@ -135,9 +133,8 @@ if __name__ == "__main__":
     cluster = ClusterManager(num_gpus=TOTAL_GPUS, 
                              target_llm_servers=TARGET_LLM_SERVERS)
     
-    # --- MODIFIED: Pre-warm the target number of LLM servers ---
-    print(f"Pre-warming {TARGET_LLM_SERVERS} LLM servers...")
-    cluster.pre_warm_llm_servers()
+    # --- FINAL CHANGE: REMOVED pre-warming call ---
+    print(f"LLM servers will be dynamically provisioned up to a soft target of {TARGET_LLM_SERVERS}.")
     
     job_workload = load_jobs_from_csv(args.csv_file)
     if args.llm_trace:

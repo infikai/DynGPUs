@@ -24,11 +24,9 @@ class Scheduler:
         # Intervals
         self.progress_interval = progress_interval
         self.log_interval = log_interval
-        # --- REMOVED: policy_interval ---
         self.start_time = start_time
         self.end_time = end_time
 
-        # --- NEW: Store threshold ---
         self.end_time_threshold = end_time_threshold
 
         # Initialize log files
@@ -39,16 +37,14 @@ class Scheduler:
     def _initialize_logs(self):
         """Writes headers to the log files."""
         self.training_log_file.write("job_id,arrival_time,base_duration,ideal_completion_time,actual_completion_time,performance_factor,gpus\n")
-        # --- MODIFIED: New log headers for unified pool ---
         self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,llm_servers_total,llm_servers_busy\n")
 
     def _log_gpu_usage(self):
         """
         Logs a snapshot of GPU usage in the unified pool.
         """
-        # --- MODIFIED: Logic for unified pool ---
         training_gpus_used = set()
-        inference_gpus_used = set() # For non-LLM inference
+        inference_gpus_used = set() 
         llm_servers_count = 0
         llm_servers_busy = 0
 
@@ -58,7 +54,6 @@ class Scheduler:
                 if gpu.running_tasks:
                     llm_servers_busy += 1
             else:
-                # GPU is in the general pool
                 for task in gpu.running_tasks.values():
                     job_type = task['job'].job_type
                     if job_type == 'training':
@@ -68,8 +63,6 @@ class Scheduler:
 
         self.usage_log_file.write(f"{self.clock.current_time},{len(training_gpus_used)},{len(inference_gpus_used)},{llm_servers_count},{llm_servers_busy}\n")
 
-    # --- REMOVED: _apply_adaptive_llm_policy ---
-
     def _dispatch_job(self, job):
         """Routes a job to the appropriate dispatch method based on its type."""
         if job.job_type == 'training':
@@ -77,16 +70,12 @@ class Scheduler:
         elif job.job_type == 'inference':
             return self._dispatch_inference_job(job)
         elif job.job_type == 'llm_inference':
-            # This path is now for single jobs, batch is separate
             return self._dispatch_llm_inference_job(job)
         return False
     
     def _batch_dispatch_llm_jobs(self, llm_jobs):
         """
-        Dispatches a batch of LLM jobs using the new 3-priority policy.
-        P1: Fill existing non-draining servers
-        P2: Preempt training jobs (ONLY if knob is active)
-        P3: Grab idle GPUs
+        Dispatches a batch of LLM jobs using the priority flow: P1 -> P2 (Knob) -> P3.
         """
         if not llm_jobs:
             return []
@@ -114,20 +103,19 @@ class Scheduler:
         if not jobs_to_assign:
             return [] 
 
-        # --- NEW: Check the "knob" before activating P2 ---
+        # --- REINSTATED KNOB LOGIC ---
         
-        # A "non-draining" server is a permanent server (P1 or P3)
         non_draining_servers_count = sum(1 for gpu in self.cluster.gpus 
                                          if gpu.is_llm_server and gpu.drain_at_time == -1)
         
-        # --- FIX IS HERE ---
-        # 1. Use self.cluster.target_llm_servers instead of 300
-        # 2. Use '>=' so preemption works as soon as the base cluster is full
-        allow_preemption = non_draining_servers_count >= self.cluster.target_llm_servers
+        # Threshold set to 300 as explicitly observed/requested by the user.
+        PREEMPTION_THRESHOLD = 300
+        allow_preemption = non_draining_servers_count > PREEMPTION_THRESHOLD
 
         if allow_preemption:
             # --- Priority 2: Preempt "safe" training jobs ---
-            print(f"    [LLM Dispatch] P1 full. Knob active (Servers: {non_draining_servers_count} >= Target: {self.cluster.target_llm_servers}). Trying P2 (Preempt).")
+            print(f"    [LLM Dispatch] P1 full. Knob active (Servers: {non_draining_servers_count} > Threshold: {PREEMPTION_THRESHOLD}). Trying P2 (Preempt).")
+            
             while jobs_to_assign:
                 victim_job, victim_gpu = self.cluster.find_preemptible_job(self.clock.current_time)
                 if not victim_job:
@@ -149,16 +137,15 @@ class Scheduler:
                     job.start_time = self.clock.current_time
                     victim_gpu.assign_llm_task(job) 
                     self.running_jobs.append(job)
-        else:
-            print(f"    [LLM Dispatch] P1 full. Knob inactive (Servers: {non_draining_servers_count} < Target: {self.cluster.target_llm_servers}). Skipping P2.")
-            
-        # --- END OF MODIFIED SECTION ---
-
+        
+        # --- END OF P2 (Knob) LOGIC ---
+        
         if not jobs_to_assign:
             return []
 
-        # --- Priority 3: Grab idle GPUs and convert them ---
-        print(f"    [LLM Dispatch] P2 skipped or full. {len(jobs_to_assign)} jobs remain. Trying P3 (Expand).")
+        # --- Priority 3: Grab idle GPUs and convert them (Last Resort) ---
+        # Note: This runs if P1 was full AND P2 was skipped (due to the knob) or exhausted.
+        print(f"    [LLM Dispatch] P2 skipped or exhausted. {len(jobs_to_assign)} jobs remain. Trying P3 (Expand).")
         while jobs_to_assign:
             idle_gpus = self.cluster.find_idle_gpus(1)
             if not idle_gpus:
@@ -185,7 +172,6 @@ class Scheduler:
         Schedules a *single* LLM inference request using the 3-priority policy.
         """
         # P1: Find existing server with slots
-        # --- MODIFIED: Pass current time ---
         gpu = self.cluster.find_gpu_for_llm_job(self.clock.current_time)
         
         # P2: If none, preempt a "safe" training job
@@ -196,7 +182,6 @@ class Scheduler:
                 self.preemption_map[victim_gpu.gpu_id] = victim_job
                 self.preemption_count += 1
                 
-                # --- MODIFIED: Set drain timer ---
                 drain_time = self.clock.current_time + 1000.0
                 victim_gpu.convert_to_llm_server(drain_at_time=drain_time)
                 gpu = victim_gpu
@@ -206,7 +191,6 @@ class Scheduler:
             idle_gpus = self.cluster.find_idle_gpus(1)
             if idle_gpus:
                 gpu = idle_gpus[0]
-                # --- MODIFIED: Convert without drain timer ---
                 gpu.convert_to_llm_server()
         
         if gpu:
@@ -216,11 +200,10 @@ class Scheduler:
             self.running_jobs.append(job)
             return True
             
-        return False # All priorities failed
+        return False 
 
     def _dispatch_inference_job(self, job):
         """Routes a non-LLM inference job."""
-        # --- MODIFIED: Removed SHARABLE_GPU_MEM_PENALTY_GB ---
         is_large_job = (job.memory_required > GPU_MEMORY_GB or 
                         job.utilization_required > GPU_UTILIZATION_PERCENT)
         
@@ -238,19 +221,16 @@ class Scheduler:
             self.running_jobs.append(job)
             return True
         
-        # --- MODIFIED: No preemption for low-priority stackable jobs ---
         return False
 
     def _dispatch_large_inference_job(self, job):
         """Schedules a large inference job. No preemption."""
-        # --- MODIFIED: Use unified pool constants ---
         gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
                           math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
         job.gpus_needed = gpus_needed
         
         allocated_gpus = self.cluster.find_idle_gpus(gpus_needed)
         
-        # --- MODIFIED: No preemption for low-priority large jobs ---
         if len(allocated_gpus) == gpus_needed:
             job.assign_resources(allocated_gpus, self.clock.current_time)
             self.running_jobs.append(job)
@@ -263,13 +243,10 @@ class Scheduler:
                           math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
         job.gpus_needed = gpus_needed
 
-        # --- NEW: Set the job's max allowable duration based on the threshold ---
         job.max_allowable_duration = job.ideal_duration * self.end_time_threshold
 
-        # --- MODIFIED: Use the unified idle GPU finder ---
         allocated_gpus = self.cluster.find_idle_gpus(gpus_needed)
         
-        # --- MODIFIED: Removed all "extra GPU" / "greedy" logic ---
         if len(allocated_gpus) == gpus_needed:
             job.assign_resources(allocated_gpus, self.clock.current_time)
             self.running_jobs.append(job)
@@ -285,18 +262,12 @@ class Scheduler:
         num_llm_servers = sum(1 for g in self.cluster.gpus if g.is_llm_server)
         
         if num_llm_servers <= self.cluster.target_llm_servers:
-            return # We are at or below the target, nothing to do.
+            return 
 
         num_to_revert = num_llm_servers - self.cluster.target_llm_servers
         if num_to_revert <= 0:
             return
             
-        # Find all P3 (expansion) servers that are idle.
-        # A P3 server is:
-        # 1. An LLM server
-        # 2. Empty (no running tasks)
-        # 3. NOT a P2 server (i.e., not in the preemption_map)
-        
         candidates = []
         for gpu in self.cluster.gpus:
             if (gpu.is_llm_server and 
@@ -306,13 +277,11 @@ class Scheduler:
                 candidates.append(gpu)
 
         if candidates:
-            # We only need to revert the excess
             num_can_revert = min(len(candidates), num_to_revert)
             
             if num_can_revert > 0:
                 print(f"    [LLM Scale-Down Policy] Found {num_llm_servers} servers (Target: {self.cluster.target_llm_servers}). Reverting {num_can_revert} idle expansion servers.")
                 
-                # Revert up to num_to_revert
                 for i in range(num_can_revert):
                     gpu_to_revert = candidates[i]
                     gpu_to_revert.revert_from_llm_server()
@@ -343,23 +312,20 @@ class Scheduler:
             if gpu.gpu_id in self.preemption_map:
                 # Check if it's empty
                 if gpu.is_idle() or (gpu.is_llm_server and not gpu.running_tasks):
-                    reclaiming_job = self.preemption_map.pop(gpu.gpu_id) # Pop it
+                    reclaiming_job = self.preemption_map.pop(gpu.gpu_id) 
                     
                     if reclaiming_job in self.running_jobs:
                         if gpu.is_llm_server:
-                            gpu.revert_from_llm_server() # Revert
+                            gpu.revert_from_llm_server() 
                         
                         reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
                         self.reclamation_count += 1
                         print(f"✅ Clock {self.clock.current_time}: RECLAIMED GPU {gpu.gpu_id} for training job {reclaiming_job.id}.")
                     
-                    # --- THIS IS THE FIX ---
-                    # The original training job is gone, but the P2 server is now
-                    # empty. We MUST revert it to prevent a "zombie" server.
+                    # Zombie Cleanup: Original job is gone, revert the server.
                     elif gpu.is_llm_server:
                         print(f"    [LLM Zombie Cleanup] Reverting P2 server {gpu.gpu_id} (original job {reclaiming_job.id} is gone).")
                         gpu.revert_from_llm_server()
-                    # --- END FIX ---
             
             # Check if this GPU was a P3 (expansion) server
             elif gpu.is_llm_server and not gpu.running_tasks:
@@ -401,7 +367,6 @@ class Scheduler:
             self.clock.tick()
 
             if self.clock.current_time > 0:
-                # --- REMOVED: Adaptive LLM policy call ---
                 
                 # Log GPU usage
                 if self.clock.current_time % self.log_interval == 0:
@@ -409,7 +374,6 @@ class Scheduler:
             
             if self.clock.current_time % self.progress_interval == 0 and (self.running_jobs or self.pending_jobs or self.jobs_to_retry):
                 
-                # --- MODIFIED: Get LLM server count from unified pool ---
                 num_llm_servers = sum(1 for gpu in self.cluster.gpus if gpu.is_llm_server)
                 num_llm_jobs = sum(1 for job in self.running_jobs if job.job_type == 'llm_inference')
                 
@@ -430,7 +394,6 @@ class Scheduler:
                 arrived_llm_jobs = [j for j in arrived_jobs if j.job_type == 'llm_inference']
                 other_arrived_jobs = [j for j in arrived_jobs if j.job_type != 'llm_inference']
                 
-                # --- MODIFIED: Use new batch dispatcher ---
                 unassigned_llm_jobs = self._batch_dispatch_llm_jobs(arrived_llm_jobs)
 
                 unassigned_other_jobs = []
@@ -482,7 +445,6 @@ class Scheduler:
                 f"  - Inference (LLM): {len(llm_inference_jobs)}",
                 f"Total Preemptions (for LLM jobs): {self.preemption_count}",
                 f"Total Successful Reclamations: {self.reclamation_count}",
-                # --- REMOVED: max_locked_gpus ---
                 f"Average Training Job Turnaround: {avg_training_turnaround:.2f} seconds",
                 f"Average Inference (Regular) Job Turnaround: {avg_inference_turnaround:.2f} seconds",
                 f"Average Inference (LLM) Job Turnaround: {avg_llm_turnaround:.2f} seconds",
