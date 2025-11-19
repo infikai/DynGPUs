@@ -84,7 +84,7 @@ class Scheduler:
         
         # --- Priority 1: Fill all available slots on existing LLM servers ---
         existing_servers = [gpu for gpu in self.cluster.gpus if gpu.is_llm_server]
-        existing_servers.sort(key=lambda g: g.llm_slots_available, reverse=True)
+        existing_servers.sort(key=lambda g: g.llm_slots_available)
 
         for gpu in existing_servers:
             if not gpu.is_available_for_llm(self.clock.current_time):
