@@ -88,3 +88,6 @@ class ClusterManager:
     def release_resources_for_job(self, job):
         for gpu in job.assigned_gpus:
             gpu.release_task(job)
+
+    def get_all_gpus(self):
+        return self.all_gpus
