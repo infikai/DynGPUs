@@ -10,7 +10,7 @@ from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATIO
 SCALE_UP_THRESHOLD = 2    # Need 2 consecutive "up" signals to scale up
 SCALE_DOWN_THRESHOLD = 3  # Need 3 consecutive "down" signals to scale down
 
-SCALE_UP_SIGNAL_THRESHOLD = 8 # Min difference between arrivals and completions to trigger an "up" signal
+SCALE_UP_SIGNAL_THRESHOLD = 20 # Min difference between arrivals and completions to trigger an "up" signal
 
 class Scheduler:
     def __init__(self, jobs_list, cluster_manager, progress_interval, log_interval, start_time, end_time, tick_duration, end_time_threshold):
@@ -116,29 +116,47 @@ class Scheduler:
 
         # --- 2. Act on Persistent Signals ---
         if self.consecutive_scale_up_signals >= SCALE_UP_THRESHOLD:
-            # Find an idle GPU to convert. Priority: Inference Pool > Training Pool
-            gpu_to_convert = None
-            idle_infer_gpus = self.cluster.find_idle_gpus_in_inference_pool()
-            if idle_infer_gpus:
-                gpu_to_convert = idle_infer_gpus[0]
-            else:
-                idle_train_gpus = self.cluster.find_idle_gpus_in_training_pool()
-                if idle_train_gpus:
-                    gpu_to_convert = idle_train_gpus[0]
+            # --- NEW: Proportional Scale-Up ---
+            net_demand = self.llm_arrivals_this_interval - self.llm_completions_this_interval
+            # Scale up proportionally to how much demand outstrips supply
+            num_to_scale_up = math.ceil(net_demand / SCALE_UP_SIGNAL_THRESHOLD)
+
+            for _ in range(num_to_scale_up):
+                gpu_to_convert = None
+                # Priority: Find idle in Inference Pool, then Training Pool
+                idle_infer_gpus = self.cluster.find_idle_gpus_in_inference_pool()
+                if idle_infer_gpus:
+                    gpu_to_convert = idle_infer_gpus[0]
+                else:
+                    idle_train_gpus = self.cluster.find_idle_gpus_in_training_pool()
+                    if idle_train_gpus:
+                        gpu_to_convert = idle_train_gpus[0]
+                
+                if gpu_to_convert and gpu_to_convert.convert_to_llm_server():
+                    pass # Successfully converted
+                else:
+                    break # Stop if no more idle GPUs can be found
             
-            if gpu_to_convert and gpu_to_convert.convert_to_llm_server():
-                # print(f"SCALING UP: Converted GPU {gpu_to_convert.gpu_id} to LLM Server at time {self.clock.current_time}")
-                self.consecutive_scale_up_signals = 0 # Reset after acting
+            self.consecutive_scale_up_signals = 0 # Reset after acting
 
         elif self.consecutive_scale_down_signals >= SCALE_DOWN_THRESHOLD:
-            # Find an idle LLM server to revert
-            for gpu in self.cluster.get_all_gpus():
-                # Find a server that is completely unused.
-                if gpu.is_llm_server and not gpu.running_tasks:
-                    if gpu.revert_from_llm_server():
-                        # print(f"SCALING DOWN: Reverted GPU {gpu.gpu_id} to idle at time {self.clock.current_time}")
-                        self.consecutive_scale_down_signals = 0 # Reset after acting
-                        break # Only scale down one server per action
+            # --- NEW: Proportional and Prioritized Scale-Down ---
+            # Find all idle LLM servers that can be reverted
+            idle_llm_servers_train_pool = [
+                g for g in self.cluster.training_pool if g.is_llm_server and not g.running_tasks
+            ]
+            idle_llm_servers_infer_pool = [
+                g for g in self.cluster.inference_pool if g.is_llm_server and not g.running_tasks
+            ]
+            
+            # Prioritize reverting from training pool first
+            revert_candidates = idle_llm_servers_train_pool + idle_llm_servers_infer_pool
+            
+            # Revert multiple servers if they are idle
+            for gpu in revert_candidates:
+                gpu.revert_from_llm_server()
+
+            self.consecutive_scale_down_signals = 0 # Reset after acting
 
         # --- 3. Reset Interval Counters ---
         self.llm_arrivals_this_interval = 0
