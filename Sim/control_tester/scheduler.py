@@ -10,6 +10,8 @@ from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATIO
 SCALE_UP_THRESHOLD = 2    # Need 2 consecutive "up" signals to scale up
 SCALE_DOWN_THRESHOLD = 3  # Need 3 consecutive "down" signals to scale down
 
+SCALE_UP_SIGNAL_THRESHOLD = 8 # Min difference between arrivals and completions to trigger an "up" signal
+
 class Scheduler:
     def __init__(self, jobs_list, cluster_manager, progress_interval, log_interval, start_time, end_time, tick_duration, end_time_threshold):
         self.pending_jobs = deque(sorted(jobs_list, key=lambda j: j.arrival_time))
