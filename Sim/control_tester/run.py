@@ -86,7 +86,7 @@ if __name__ == "__main__":
     cluster = ClusterManager(num_training_gpus=TRAINING_POOL_SIZE, 
                              num_inference_gpus=INFERENCE_POOL_SIZE)
     
-    cluster.pre_warm_llm_servers()
+    # cluster.pre_warm_llm_servers() # Disabled to test scaling from a cold start.
     
     job_workload = load_jobs_from_csv(args.csv_file)
     if args.llm_trace:
