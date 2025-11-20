@@ -8,7 +8,7 @@ from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATIO
 
 # --- NEW: LLM Scaling Thresholds ---
 SCALE_UP_THRESHOLD = 2    # Need 2 consecutive "up" signals to scale up
-SCALE_DOWN_THRESHOLD = 3  # Need 3 consecutive "down" signals to scale down
+SCALE_DOWN_THRESHOLD = 2  # Need 3 consecutive "down" signals to scale down
 
 SCALE_UP_SIGNAL_THRESHOLD = 20 # Min difference between arrivals and completions to trigger an "up" signal
 
