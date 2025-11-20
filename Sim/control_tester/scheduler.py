@@ -1,0 +1,397 @@
+# file: scheduler.py
+
+import math
+from collections import deque
+from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATION_PERCENT, 
+                        PREEMPTION_OVERHEAD, RECLAMATION_OVERHEAD, 
+                        LLM_POLICY_INTERVAL, LLM_MAX_CONCURRENCY, PREEMPTION_COOLDOWN)
+
+# --- NEW: LLM Scaling Thresholds ---
+SCALE_UP_THRESHOLD = 2    # Need 2 consecutive "up" signals to scale up
+SCALE_DOWN_THRESHOLD = 3  # Need 3 consecutive "down" signals to scale down
+SCALE_UP_SIGNAL_THRESHOLD = 5 # Min difference between arrivals and completions to trigger an "up" signal
+
+class Scheduler:
+    def __init__(self, jobs_list, cluster_manager, progress_interval, log_interval, start_time, end_time, tick_duration, end_time_threshold):
+        self.pending_jobs = deque(sorted(jobs_list, key=lambda j: j.arrival_time))
+        self.running_jobs = []
+        self.completed_jobs = []
+        self.cluster = cluster_manager
+        self.clock = SimulationClock(tick_duration=tick_duration)
+        self.preemption_count = 0
+        self.reclamation_count = 0
+        
+        # Maps GPU ID -> Job object waiting for it
+        self.preemption_map = {} 
+
+        self.progress_interval = progress_interval
+        self.log_interval = log_interval
+        self.start_time = start_time
+        self.end_time = end_time
+        self.end_time_threshold = end_time_threshold
+
+        self.delay_log_interval = 600 
+        self.next_delay_log_time = 0 
+        self.current_inference_delays = [] 
+
+        # --- NEW: LLM Scaling Policy Attributes ---
+        self.next_llm_scale_time = 0
+        self.llm_arrivals_this_interval = 0
+        self.llm_completions_this_interval = 0
+        self.consecutive_scale_up_signals = 0
+        self.consecutive_scale_down_signals = 0
+
+        self.training_log_file = open("training_job_log.csv", "w")
+        self.usage_log_file = open("gpu_usage_log.csv", "w")
+        self.inference_delay_log_file = open("inference_delay_log.csv", "w")
+        self._initialize_logs()
+
+    def _initialize_logs(self):
+        self.training_log_file.write("job_id,arrival_time,start_time,delay,base_duration,ideal_completion_time,actual_completion_time,performance_factor,gpus\n")
+        self.inference_delay_log_file.write("timestamp,average_delay_seconds,p95_delay_seconds,max_delay_seconds,job_count\n")
+        self.usage_log_file.write("timestamp,train_pool_used,infer_pool_used_by_train,infer_pool_active_llm,train_pool_active_llm,infer_pool_llm_total,train_pool_llm_total,llm_slots_used\n")
+
+    def _log_gpu_usage(self):
+        train_pool_used = sum(1 for g in self.cluster.training_pool if not g.is_idle() and not g.is_llm_server)
+        infer_pool_borrowed = sum(1 for g in self.cluster.inference_pool 
+                                  if not g.is_llm_server and not g.is_idle())
+        infer_pool_llm_active = sum(1 for g in self.cluster.inference_pool 
+                                    if g.is_llm_server and g.running_tasks)
+        train_pool_llm_active = sum(1 for g in self.cluster.training_pool 
+                                    if g.is_llm_server and g.running_tasks)
+        
+        infer_pool_llm_total = sum(1 for g in self.cluster.inference_pool if g.is_llm_server)
+        train_pool_llm_total = sum(1 for g in self.cluster.training_pool if g.is_llm_server)
+
+        llm_slots_used = sum(len(g.running_tasks) for g in self.cluster.get_all_gpus() if g.is_llm_server)
+
+        self.usage_log_file.write(
+            f"{self.clock.current_time},{train_pool_used},{infer_pool_borrowed},"
+            f"{infer_pool_llm_active},{train_pool_llm_active},{infer_pool_llm_total},{train_pool_llm_total},{llm_slots_used}\n"
+        )
+
+    def _log_average_inference_delay(self):
+        if not self.current_inference_delays:
+            avg_delay = 0
+            p95_delay = 0
+            max_delay = 0
+            job_count = 0
+        else:
+            sorted_delays = sorted(self.current_inference_delays)
+            p95_index = int(len(sorted_delays) * 0.95)
+            p95_delay = sorted_delays[p95_index]
+            max_delay = sorted_delays[-1]
+            avg_delay = sum(self.current_inference_delays) / len(self.current_inference_delays)
+            job_count = len(self.current_inference_delays)
+        self.inference_delay_log_file.write(f"{self.clock.current_time},{avg_delay:.2f},{p95_delay:.2f},{max_delay:.2f},{job_count}\n")
+        self.current_inference_delays = []
+
+    def _dispatch_job(self, job):
+        if job.job_type == 'training':
+            return self._dispatch_training_job(job)
+        elif job.job_type == 'llm_inference':
+            return self._dispatch_llm_inference_job(job)
+        elif job.job_type == 'inference':
+             return self._dispatch_training_job(job)
+        return False
+    
+    def _update_llm_capacity(self):
+        """
+        Periodically called to scale LLM server capacity up or down based on request rates.
+        """
+        # --- 1. Determine Signal for this Interval ---
+        if (self.llm_arrivals_this_interval - self.llm_completions_this_interval) >= SCALE_UP_SIGNAL_THRESHOLD:
+            # "Scale Up" signal: demand is outpacing supply
+            self.consecutive_scale_up_signals += 1
+            self.consecutive_scale_down_signals = 0
+        elif self.llm_arrivals_this_interval == 0:
+            # "Scale Down" signal: no demand in this interval
+            self.consecutive_scale_down_signals += 1
+            self.consecutive_scale_up_signals = 0
+        else:
+            # "Hold" signal: reset counters as the trend is broken
+            self.consecutive_scale_up_signals = 0
+            self.consecutive_scale_down_signals = 0
+
+        # --- 2. Act on Persistent Signals ---
+        if self.consecutive_scale_up_signals >= SCALE_UP_THRESHOLD:
+            # Find an idle GPU to convert. Priority: Inference Pool > Training Pool
+            gpu_to_convert = None
+            idle_infer_gpus = self.cluster.find_idle_gpus_in_inference_pool()
+            if idle_infer_gpus:
+                gpu_to_convert = idle_infer_gpus[0]
+            else:
+                idle_train_gpus = self.cluster.find_idle_gpus_in_training_pool()
+                if idle_train_gpus:
+                    gpu_to_convert = idle_train_gpus[0]
+            
+            if gpu_to_convert and gpu_to_convert.convert_to_llm_server():
+                # print(f"SCALING UP: Converted GPU {gpu_to_convert.gpu_id} to LLM Server at time {self.clock.current_time}")
+                self.consecutive_scale_up_signals = 0 # Reset after acting
+
+        elif self.consecutive_scale_down_signals >= SCALE_DOWN_THRESHOLD:
+            # Find an idle LLM server to revert
+            for gpu in self.cluster.get_all_gpus():
+                # Find a server that is completely unused.
+                if gpu.is_llm_server and not gpu.running_tasks:
+                    if gpu.revert_from_llm_server():
+                        # print(f"SCALING DOWN: Reverted GPU {gpu.gpu_id} to idle at time {self.clock.current_time}")
+                        self.consecutive_scale_down_signals = 0 # Reset after acting
+                        break # Only scale down one server per action
+
+        # --- 3. Reset Interval Counters ---
+        self.llm_arrivals_this_interval = 0
+        self.llm_completions_this_interval = 0
+
+    def _batch_dispatch_llm_jobs(self, llm_jobs):
+        """
+        Dispatches a batch of LLM jobs ONLY to existing LLM servers.
+        The scaling logic is now handled by `_update_llm_capacity`.
+        """
+        jobs_to_assign = deque(llm_jobs)
+        if not jobs_to_assign:
+            return []
+
+        # --- Pass 1: Fill all servers up to their SOFT limit (LLM_MAX_CONCURRENCY) ---
+        all_llm_gpus = [gpu for gpu in self.cluster.get_all_gpus() if gpu.is_llm_server]
+
+        for gpu in all_llm_gpus:
+            while jobs_to_assign and len(gpu.running_tasks) < LLM_MAX_CONCURRENCY:
+                job = jobs_to_assign.popleft()
+                job.assigned_gpus = [gpu]
+                job.start_time = self.clock.current_time
+                delay = math.floor(max(0, job.start_time - job.arrival_time))
+                if delay > 0:
+                    self.current_inference_delays.append(delay)
+                
+                gpu.assign_llm_task(job)
+                self.running_jobs.append(job)
+
+        if not jobs_to_assign:
+            return []
+
+        # --- Pass 2: Over-subscribe servers up to their HARD limit ---
+        for gpu in all_llm_gpus:
+            # is_available_for_llm checks against the HARD limit
+            while jobs_to_assign and gpu.is_available_for_llm(self.clock.current_time):
+                job = jobs_to_assign.popleft()
+                job.assigned_gpus = [gpu]
+                job.start_time = self.clock.current_time
+                delay = math.floor(max(0, job.start_time - job.arrival_time))
+                if delay > 0:
+                    self.current_inference_delays.append(delay)
+                
+                gpu.assign_llm_task(job)
+                self.running_jobs.append(job)
+        
+        # Any jobs still in jobs_to_assign could not be scheduled.
+        # This can happen if all servers are at their hard limit.
+
+        return list(jobs_to_assign)
+
+    def _dispatch_training_job(self, job):
+        gpus_needed = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
+                          math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
+        job.gpus_needed = gpus_needed
+        job.max_allowable_duration = job.ideal_duration * self.end_time_threshold
+
+        # --- 1. Find IMMEDIATE Resources ---
+        
+        # A: Idle GPUs in Training Pool (Prioritize Own Pool)
+        train_idle = []
+        for g in self.cluster.training_pool:
+            if g.is_idle(): 
+                train_idle.append(g)
+            elif g.is_llm_server and not g.running_tasks:
+                g.revert_from_llm_server()
+                train_idle.append(g)
+        
+        # B: Idle GPUs in Inference Pool (Borrow)
+        infer_borrow = []
+        for g in self.cluster.find_idle_resources_in_inference_pool():
+            if g.is_llm_server:
+                g.revert_from_llm_server() 
+            infer_borrow.append(g)
+            
+        # Combine Immediate (Prioritize TrainPool then InferPool)
+        immediate_gpus = train_idle + infer_borrow
+        
+        # --- 2. Dispatch Logic (Only Full Assignment) ---
+        total_available = len(immediate_gpus)
+        
+        if total_available >= gpus_needed:
+            # We can satisfy the job entirely with immediate resources
+            gpus_to_start = immediate_gpus[:gpus_needed]
+            
+            job.assign_resources(gpus_to_start, self.clock.current_time)
+            self.running_jobs.append(job)
+            return True
+        
+        # Job must wait in pending
+        return False
+
+    def _handle_job_completion(self, job):
+        freed_gpus = list(job.assigned_gpus)
+        self.cluster.release_resources_for_job(job)
+        job.record_completion(self.clock.current_time)
+        self.running_jobs.remove(job)
+        self.completed_jobs.append(job)
+
+        if job.job_type == 'training':
+            ideal_completion_time = job.arrival_time + job.base_duration
+            actual_duration = job.completion_time - job.arrival_time
+            perf_factor = actual_duration / job.base_duration if job.base_duration > 0 else 0
+            delay = max(0, job.start_time - job.arrival_time) if job.start_time != -1 else 0
+            log_entry = (f"{job.id},{job.arrival_time},{job.start_time},{delay:.2f},{job.base_duration},"
+                         f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{job.gpus_needed}\n")
+            self.training_log_file.write(log_entry)
+
+        if job.job_type == 'llm_inference':
+            self.llm_completions_this_interval += 1
+
+        # --- Cleanup & Reclamation Logic ---
+        for gpu in freed_gpus:
+            
+            # 1. Handle Preemption/Reclamation (Job waiting for this specific GPU)
+            if gpu.gpu_id in self.preemption_map:
+                reclaiming_job = self.preemption_map[gpu.gpu_id]
+                
+                # If GPU is now free (idle or empty server)
+                if gpu.is_idle() or (gpu.is_llm_server and not gpu.running_tasks):
+                    
+                    # Revert if it was a server
+                    if gpu.is_llm_server:
+                         gpu.revert_from_llm_server()
+                    
+                    # Remove from map
+                    del self.preemption_map[gpu.gpu_id]
+                    
+                    # Give to job if it's already running (Partial start case)
+                    if reclaiming_job in self.running_jobs:
+                        reclaiming_job.reclaim_gpu(gpu, self.clock.current_time)
+                        self.reclamation_count += 1
+                        # print(f"✅ Clock {self.clock.current_time}: Job {reclaiming_job.id} reclaimed draining GPU {gpu.gpu_id}.")
+                    else:
+                        # If job is still pending (started with 0 GPUs), it just becomes idle
+                        # and will be picked up in the next dispatch loop.
+                        pass
+            
+            # 2. Auto-revert logic for Training Pool GPUs
+            # If an LLM job finishes on a Training GPU, and no one is explicitly waiting (map checked above),
+            # check if it should revert anyway to be available for general training.
+            if job.job_type == 'llm_inference' and gpu.pool_type == 'training':
+                if gpu.is_llm_server and not gpu.running_tasks:
+                     gpu.revert_from_llm_server()
+                     # print(f"Testing: Reverted Training GPU {gpu.gpu_id} from LLM server to Idle.")
+
+    def run_simulation(self):
+        if not self.pending_jobs: return
+
+        effective_start_time = self.start_time if self.start_time > 0 else self.pending_jobs[0].arrival_time
+        self.clock.current_time = effective_start_time
+        self.next_delay_log_time = ( (effective_start_time // self.delay_log_interval) + 1 ) * self.delay_log_interval
+        self.next_llm_scale_time = ( (effective_start_time // LLM_POLICY_INTERVAL) + 1 ) * LLM_POLICY_INTERVAL
+        
+        self.jobs_to_retry = deque()
+        self.pending_jobs = deque([j for j in self.pending_jobs if j.arrival_time >= effective_start_time])
+
+        while self.pending_jobs or self.running_jobs or self.jobs_to_retry:
+            if self.end_time != -1 and self.clock.current_time >= self.end_time:
+                break
+            
+            self.clock.tick()
+            
+            if self.clock.current_time >= self.next_llm_scale_time:
+                self._update_llm_capacity()
+                self.next_llm_scale_time += LLM_POLICY_INTERVAL
+
+            if self.clock.current_time >= self.next_delay_log_time:
+                self._log_average_inference_delay()
+                self.next_delay_log_time += self.delay_log_interval
+
+            if self.clock.current_time % self.log_interval == 0:
+                self._log_gpu_usage()
+            
+            if self.clock.current_time % self.progress_interval == 0:
+                 print(f"🕒 Clock {self.clock.current_time}: Running={len(self.running_jobs)}, Pending={len(self.pending_jobs)}")
+            
+            arrived_jobs = list(self.jobs_to_retry)
+            self.jobs_to_retry.clear()
+            while self.pending_jobs and self.pending_jobs[0].arrival_time <= self.clock.current_time:
+                arrived_jobs.append(self.pending_jobs.popleft())
+
+            if arrived_jobs:
+                arrived_llm_jobs = [j for j in arrived_jobs if j.job_type == 'llm_inference']
+                self.llm_arrivals_this_interval += len(arrived_llm_jobs)
+                other_arrived_jobs = [j for j in arrived_jobs if j.job_type != 'llm_inference']
+                
+                # Use the fast batch dispatcher
+                unassigned_llm = self._batch_dispatch_llm_jobs(arrived_llm_jobs)
+                
+                unassigned_other = []
+                for job in other_arrived_jobs:
+                    if not self._dispatch_job(job):
+                        unassigned_other.append(job)
+
+                self.jobs_to_retry.extend(unassigned_llm + unassigned_other)
+            
+            finished_this_tick = []
+            for job in self.running_jobs:
+                job.update_progress(self.clock.tick_duration, self.clock.current_time)
+                if job.is_complete():
+                    finished_this_tick.append(job)
+            
+            for job in finished_this_tick:
+                self._handle_job_completion(job)
+
+    def print_results(self):
+        self._log_average_inference_delay()
+        self.training_log_file.close()
+        self.usage_log_file.close()
+        self.inference_delay_log_file.close()
+        print("Simulation Complete. Results saved.")
+
+        with open("simulation_summary.txt", "w") as summary_file:
+            total_jobs = len(self.completed_jobs)
+            if total_jobs == 0:
+                summary_text = "No jobs were completed in the simulation window."
+                print(summary_text)
+                summary_file.write(summary_text + "\n")
+                return
+
+            training_jobs = [j for j in self.completed_jobs if j.job_type == 'training']
+            inference_jobs = [j for j in self.completed_jobs if j.job_type == 'inference']
+            llm_inference_jobs = [j for j in self.completed_jobs if j.job_type == 'llm_inference']
+            
+            # Combine regular and LLM inference for the average
+            all_inference_jobs = inference_jobs + llm_inference_jobs
+            
+            avg_training_turnaround = sum(j.turnaround_time for j in training_jobs) / len(training_jobs) if training_jobs else 0
+            avg_inference_turnaround = sum(j.turnaround_time for j in all_inference_jobs) / len(all_inference_jobs) if all_inference_jobs else 0
+            
+            # --- (NEW: Calculate average delays) ---
+            avg_training_delay = sum(j.start_time - j.arrival_time for j in training_jobs if j.start_time != -1) / len(training_jobs) if training_jobs else 0
+            avg_inference_delay = sum(j.start_time - j.arrival_time for j in all_inference_jobs if j.start_time != -1) / len(all_inference_jobs) if all_inference_jobs else 0
+
+            # Build the output lines
+            lines = [
+                "--- Simulation Results ---",
+                # --- (MODIFIED: Updated log file name in message) ---
+                f"Detailed logs saved to 'training_job_log.csv', 'inference_delay_log.csv', and 'gpu_usage_log.csv'",
+                f"Total Jobs Completed: {total_jobs}",
+                # --- (REMOVED preemption/reclamation lines) ---
+                # f"Total Preemptions: {self.preemption_count}",
+                # f"Total Successful Reclamations: {self.reclamation_count}",
+                f"Average Training Job Turnaround: {avg_training_turnaround:.2f} seconds",
+                f"Average Inference Job Turnaround: {avg_inference_turnaround:.2f} seconds",
+                # --- (NEW: Report average delays) ---
+                f"Average Training Job Delay (Queue Time): {avg_training_delay:.2f} seconds",
+                f"Average Inference Job Delay (Queue Time): {avg_inference_delay:.2f} seconds",
+                "--------------------------"
+            ]
+
+            # Print to console and write to the summary file
+            for line in lines:
+                print(line)
+                summary_file.write(line + "\n")
+                
