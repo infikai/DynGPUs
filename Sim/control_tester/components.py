@@ -86,8 +86,8 @@ class GPU:
         return True 
 
     def assign_llm_task(self, job):
-        if not self.is_llm_server or self.llm_slots_available <= 0:
-            raise Exception(f"Attempted to assign LLM job to non-server or full GPU {self.gpu_id}")
+        if not self.is_llm_server: # The scheduler should already check for capacity.
+            raise Exception(f"Attempted to assign LLM job to a GPU ({self.gpu_id}) that is not an LLM server.")
         self.llm_slots_available -= 1
         self.running_tasks[job.id] = {'job': job, 'type': 'llm_inference'}
 
