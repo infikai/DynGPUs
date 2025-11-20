@@ -12,9 +12,11 @@ class ClusterManager:
         self.target_llm_servers = num_inference_gpus 
         print(f"ClusterManager initialized: {num_training_gpus} Training GPUs, {num_inference_gpus} Inference GPUs.")
 
-    def pre_warm_llm_servers(self):
+    def pre_warm_llm_servers(self, count):
         servers_created = 0
         for gpu in self.inference_pool:
+            if servers_created >= count:
+                break
             gpu.convert_to_llm_server()
             servers_created += 1
         print(f"➡️ Successfully pre-warmed {servers_created} LLM servers in the Inference Pool.")
