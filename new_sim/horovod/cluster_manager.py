@@ -35,7 +35,7 @@ class ClusterManager:
         
         # --- Priority 1: Get all existing LLM servers ---
         active_server_gpus = [gpu for gpu in self.inference_gpus if gpu.is_llm_server]
-        active_server_gpus.sort(key=lambda gpu: gpu.llm_slots_available)
+        # active_server_gpus.sort(key=lambda gpu: gpu.llm_slots_available)
         
         available_gpus.extend(active_server_gpus)
 
