@@ -106,7 +106,7 @@ class Scheduler:
                     self.preemption_count += 1
                     
                     # Convert to LLM server and mark for draining later (when it gets reverted)
-                    victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 1000)
+                    victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 500)
                     gpu = victim_gpu
 
             if gpu:

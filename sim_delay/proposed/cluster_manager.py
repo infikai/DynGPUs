@@ -76,7 +76,7 @@ class ClusterManager:
                 training_jobs = gpu.get_running_training_jobs()
                 for job in training_jobs:
                     if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN:
-                         if job.can_be_preempted(current_time, estimated_borrow_time=1000.0):
+                         if job.can_be_preempted(current_time, estimated_borrow_time=500.0):
                              potential_victims.append((job, gpu))
 
         if not potential_victims:
