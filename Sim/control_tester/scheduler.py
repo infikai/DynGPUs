@@ -10,7 +10,7 @@ from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATIO
 SCALE_UP_THRESHOLD = 2    # Need 2 consecutive "up" signals to scale up
 SCALE_DOWN_THRESHOLD = 2  # Need 3 consecutive "down" signals to scale down
 
-SCALE_UP_SIGNAL_THRESHOLD = 20 # Min difference between arrivals and completions to trigger an "up" signal
+SCALE_UP_SIGNAL_THRESHOLD = 16 # Min difference between arrivals and completions to trigger an "up" signal
 
 class Scheduler:
     def __init__(self, jobs_list, cluster_manager, progress_interval, log_interval, start_time, end_time, tick_duration, end_time_threshold):
@@ -105,7 +105,7 @@ class Scheduler:
             # "Scale Up" signal: demand is outpacing supply
             self.consecutive_scale_up_signals += 1
             self.consecutive_scale_down_signals = 0
-        elif self.llm_arrivals_this_interval == 0:
+        elif (self.llm_arrivals_this_interval - self.llm_completions_this_interval) <= SCALE_UP_SIGNAL_THRESHOLD:
             # "Scale Down" signal: no demand in this interval
             self.consecutive_scale_down_signals += 1
             self.consecutive_scale_up_signals = 0
