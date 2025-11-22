@@ -109,7 +109,7 @@ class Scheduler:
                                          if gpu.is_llm_server and gpu.drain_at_time == -1)
         
         # Threshold set to 300 as explicitly observed/requested by the user.
-        PREEMPTION_THRESHOLD = 400
+        PREEMPTION_THRESHOLD = 300
         allow_preemption = non_draining_servers_count > PREEMPTION_THRESHOLD
 
         if allow_preemption:
