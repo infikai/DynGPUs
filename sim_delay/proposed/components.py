@@ -199,7 +199,7 @@ class Job:
         self.completion_time = current_time
         self.turnaround_time = self.completion_time - self.arrival_time
 
-    def can_be_preempted(self, current_time, estimated_borrow_time=1500.0):
+    def can_be_preempted(self, current_time, estimated_borrow_time=1000.0):
         """
         Predicts if a *future* preemption will violate the max end-time
         by checking past delays and adding future predicted delays.
