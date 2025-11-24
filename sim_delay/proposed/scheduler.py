@@ -70,65 +70,65 @@ class Scheduler:
         return False
     
     def _batch_dispatch_llm_jobs(self, llm_jobs):
-        """
-        Dispatches a batch of LLM jobs by prioritizing resource pools and filling all available slots
-        before moving to the next resource priority.
-        """
         jobs_to_assign = deque(llm_jobs)
         
         while jobs_to_assign:
             gpu = None
+            is_reclaimed = False 
             
-            # --- P1: Existing Server with Slots (Inference Pool) ---
+            # P1: Existing Server with Slots (Inference Pool)
             gpu = self.cluster.find_gpu_for_llm_job(self.clock.current_time)
 
-            # --- P2: Find idle Inference GPU (Convert and use) ---
+            # P2: Find idle Inference GPU (Convert and use)
             if not gpu:
                 idle_infer_gpus = self.cluster.find_idle_gpus_in_inference_pool()
                 if idle_infer_gpus:
                     gpu = idle_infer_gpus[0]
                     gpu.convert_to_llm_server()
 
-            # --- P3: Borrow idle Training GPU (Convert and use) ---
+            # P3: Borrow idle Training GPU (Convert and use)
             if not gpu:
                 idle_train_gpus = self.cluster.find_idle_gpus_in_training_pool()
                 if idle_train_gpus:
                     gpu = idle_train_gpus[0]
                     gpu.convert_to_llm_server()
 
-            # --- P4: Reclaim from Training job squatting on Inference Pool ---
+            # P4: Reclaim from Training job squatting on Inference Pool
             if not gpu:
                 victim_job, victim_gpu = self.cluster.find_borrowed_gpu_to_reclaim(self.clock.current_time)
                 if victim_job and victim_gpu:
-                    # Preemption costs are paid by the victim job
                     victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
                     self.preemption_map[victim_gpu.gpu_id] = victim_job
                     self.preemption_count += 1
                     
-                    # Convert to LLM server and mark for draining later (when it gets reverted)
                     victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 1000)
                     gpu = victim_gpu
+                    is_reclaimed = True 
 
             if gpu:
                 slots_to_fill = gpu.llm_slots_available
                 
-                # Fill all available slots on the found GPU
                 for _ in range(slots_to_fill):
                     if not jobs_to_assign:
                         break 
 
                     job = jobs_to_assign.popleft() 
                     
+                    # --- APPLY OVERHEAD IF RECLAIMED ---
+                    if is_reclaimed:
+                        # Only modify remaining_work, not base_duration
+                        job.remaining_work += PREEMPTION_OVERHEAD
+                    
                     job.assigned_gpus = [gpu]
                     job.start_time = self.clock.current_time
-                    delay = math.floor(max(0, job.start_time - job.arrival_time))
-                    if delay > 0:
-                        self.current_inference_delays.append(delay)
+                    delay = max(0, job.start_time - job.arrival_time)
+                    if is_reclaimed:
+                        delay += PREEMPTION_OVERHEAD
+                    self.current_inference_delays.append(delay)
                     
                     gpu.assign_llm_task(job)
                     self.running_jobs.append(job)
             else:
-                # No more resources found across all priorities.
                 break 
 
         return list(jobs_to_assign)
