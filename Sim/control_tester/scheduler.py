@@ -106,7 +106,7 @@ class Scheduler:
             # "Scale Up" signal: demand is outpacing supply
             self.consecutive_scale_up_signals += 1
             self.consecutive_scale_down_signals = 0
-        elif self.llm_arrivals_this_interval == 0:
+        elif (self.llm_arrivals_this_interval - self.llm_completions_this_interval) <= SCALE_UP_SIGNAL_THRESHOLD:
             # "Scale Down" signal: no demand in this interval
             self.consecutive_scale_down_signals += 1
             self.consecutive_scale_up_signals = 0

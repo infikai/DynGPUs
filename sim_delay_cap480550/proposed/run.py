@@ -9,7 +9,7 @@ import time
 
 # --- NEW: Define Pool Sizes ---
 TRAINING_POOL_SIZE = 550
-INFERENCE_POOL_SIZE = 450
+INFERENCE_POOL_SIZE = 480
 
 def load_jobs_from_csv(file_path):
     """
