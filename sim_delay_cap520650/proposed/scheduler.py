@@ -78,6 +78,7 @@ class Scheduler:
         
         while jobs_to_assign:
             gpu = None
+            is_reclaimed = False
             
             # --- P1: Existing Server with Slots (Inference Pool) ---
             gpu = self.cluster.find_gpu_for_llm_job(self.clock.current_time)
@@ -108,6 +109,7 @@ class Scheduler:
                     # Convert to LLM server and mark for draining later (when it gets reverted)
                     victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 1000)
                     gpu = victim_gpu
+                    is_reclaimed = True
 
             if gpu:
                 slots_to_fill = gpu.llm_slots_available
