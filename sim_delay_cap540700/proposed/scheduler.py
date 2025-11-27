@@ -119,9 +119,16 @@ class Scheduler:
 
                     job = jobs_to_assign.popleft() 
                     
+                    # --- APPLY OVERHEAD IF RECLAIMED ---
+                    if is_reclaimed:
+                        # Only modify remaining_work, not base_duration
+                        job.remaining_work += PREEMPTION_OVERHEAD
+                    
                     job.assigned_gpus = [gpu]
                     job.start_time = self.clock.current_time
                     delay = math.floor(max(0, job.start_time - job.arrival_time))
+                    if is_reclaimed:
+                        delay += PREEMPTION_OVERHEAD
                     if delay > 0:
                         self.current_inference_delays.append(delay)
                     
