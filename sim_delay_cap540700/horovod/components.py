@@ -3,16 +3,15 @@
 # --- Global Constants ---
 GPU_MEMORY_GB = 32
 GPU_UTILIZATION_PERCENT = 100
-PREEMPTION_OVERHEAD = 3
-RECLAMATION_OVERHEAD = 5
-PREEMPTION_COOLDOWN = 5
-LLM_POLICY_INTERVAL = 10 
+# PREEMPTION_OVERHEAD = 3  (REMOVED)
+# RECLAMATION_OVERHEAD = 4 (REMOVED)
+# PREEMPTION_COOLDOWN = 5  (REMOVED)
 
-# LLM Inference Performance Model Constants
-LLM_BASE_TTFT = 2.5          
-LLM_TKN_PER_INPUT = 0.005    
-LLM_TPOT = 0.1               
-LLM_MAX_CONCURRENCY = 16      
+# NEW: LLM Inference Performance Model Constants
+LLM_BASE_TTFT = 2.5          # Renamed: Base time to first token, independent of input
+LLM_TKN_PER_INPUT = 0.005    # New: Time (in seconds) to process each input token
+LLM_TPOT = 0.1               # Time Per Output Token (seconds)
+LLM_MAX_CONCURRENCY = 16      # Max concurrent requests per GPU
 
 class SimulationClock:
     """A simple discrete-time simulation clock."""
@@ -24,20 +23,22 @@ class SimulationClock:
         self.current_time += self.tick_duration
 
 class GPU:
-    def __init__(self, gpu_id, pool_type): # <-- MODIFIED: Added pool_type
+    def __init__(self, gpu_id, gpu_type):
         self.gpu_id = gpu_id
-        self.pool_type = pool_type # 'training' or 'inference'
+        self.gpu_type = gpu_type
         
         self.total_memory = GPU_MEMORY_GB
         self.total_utilization = GPU_UTILIZATION_PERCENT
         self.available_memory = self.total_memory
         self.available_utilization = self.total_utilization
         
+        # NEW: Add an attribute to store utilization before LLM jobs take over
+        self.utilization_before_llm = None
+
         self.is_llm_server = False
         self.llm_slots_total = 0
         self.llm_slots_available = 0
         
-        self.drain_at_time = -1 
         self.running_tasks = {}
 
     def can_fit(self, job):
@@ -46,62 +47,69 @@ class GPU:
 
     def assign_task(self, job, mem_slice, util_slice):
         if mem_slice > self.available_memory or util_slice > self.available_utilization:
-            raise Exception(f"Resource slice for job {job.id} cannot fit on GPU {self.gpu_id}")
+            print(f"\n‼️ WARNING: ASSIGNMENT FAILED ON GPU {self.gpu_id}")
+            print(f"   GPU State : Available Mem={self.available_memory:.2f}, Available Util={self.available_utilization:.2f}")
+            print(f"   Job Slice : Required Mem={mem_slice:.2f}, Required Util={util_slice:.2f}")
+            print(f"   Full Job  : {job!r}\n")
+            raise Exception(f"Resource slice for job {job.id}: mem:{mem_slice}, util:{util_slice} cannot fit on GPU {self.gpu_id}: {self.available_memory}: {self.available_utilization}.")
         self.available_memory -= mem_slice
         self.available_utilization -= util_slice
         self.running_tasks[job.id] = {'job': job, 'mem': mem_slice, 'util': util_slice}
 
-    def convert_to_llm_server(self, drain_at_time=-1): 
+    def convert_to_llm_server(self):
         if self.is_llm_server or not self.is_idle():
+            # Can only convert an idle, non-LLM GPU
             return False
         
         self.is_llm_server = True
         self.llm_slots_total = LLM_MAX_CONCURRENCY
         self.llm_slots_available = LLM_MAX_CONCURRENCY
-        self.drain_at_time = drain_at_time
+        
         self.available_memory = 0
         self.available_utilization = 0
         return True
 
+    # NEW: Dedicated method to revert an LLM server to a regular GPU
     def revert_from_llm_server(self):
         if not self.is_llm_server or self.running_tasks:
+            # Can only revert an LLM server that is empty.
             return False
         
         self.is_llm_server = False
         self.llm_slots_total = 0
         self.llm_slots_available = 0
-        self.drain_at_time = -1
+        
         self.available_memory = self.total_memory
         self.available_utilization = self.total_utilization
         return True
-    
-    def is_available_for_llm(self, current_time):
-        if not self.is_llm_server or self.llm_slots_available <= 0:
-            return False
-        if self.drain_at_time != -1 and current_time >= self.drain_at_time:
-            return False 
-        return True 
 
+    # SIMPLIFIED: This method no longer handles conversion
     def assign_llm_task(self, job):
         if not self.is_llm_server or self.llm_slots_available <= 0:
             raise Exception(f"Attempted to assign LLM job to non-server or full GPU {self.gpu_id}")
         self.llm_slots_available -= 1
         self.running_tasks[job.id] = {'job': job, 'type': 'llm_inference'}
 
+    # SIMPLIFIED: This method no longer handles reversion
     def release_task(self, job):
         if job.id not in self.running_tasks: return
         task_info = self.running_tasks.pop(job.id)
         if task_info.get('type') == 'llm_inference':
             self.llm_slots_available += 1
-        else: 
+        else: # Regular job
             self.available_memory += task_info['mem']
             self.available_utilization += task_info['util']
     
     def is_idle(self):
+        """
+        A GPU is only truly idle if it has no tasks AND it is not currently
+        configured as an exclusive-use LLM server.
+        """
         return not self.running_tasks and not self.is_llm_server
 
-    def get_running_training_jobs(self):
-        return [task['job'] for task in self.running_tasks.values() if task['job'].job_type == 'training']
+    # --- (REMOVED get_running_training_jobs method) ---
+    # def get_running_training_jobs(self):
+    #     return [task['job'] for task in self.running_tasks.values() if task['job'].job_type == 'training']
 
 class Job:
     def __init__(self, id, job_type, arrival_time, base_duration=0, 
@@ -116,6 +124,7 @@ class Job:
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
 
+        # If it's an LLM job, calculate its duration now
         if self.job_type == 'llm_inference':
             time_to_process_input = LLM_TKN_PER_INPUT * self.input_tokens
             time_to_generate_output = LLM_TPOT * self.output_tokens
@@ -126,15 +135,15 @@ class Job:
         self.start_time = -1
         self.completion_time = -1
         self.turnaround_time = -1
-        self.paused_until = -1
+        # self.paused_until = -1 (REMOVED)
         self.gpus_needed = 1
-        self.last_preemption_time = -1
+        # self.last_preemption_time = -1 (REMOVED)
         
-        self.ideal_duration = self.base_duration
-        self.max_allowable_duration = float('inf') 
-        
+    # ** NEW: Add __repr__ for detailed, developer-friendly printing **
     def __repr__(self):
         return (f"<Job id={self.id} type={self.job_type} "
+                f"mem_req={self.memory_required:.2f} util_req={self.utilization_required:.2f} "
+                f"in_token={self.input_tokens} out_token={self.output_tokens} "
                 f"gpus_needed={self.gpus_needed} duration={self.base_duration} remain={self.remaining_work}>")
 
     def assign_resources(self, gpus, current_time):
@@ -143,52 +152,32 @@ class Job:
         self._distribute_load()
 
     def _distribute_load(self):
-        num_gpus_originally_needed = self.gpus_needed
-        if num_gpus_originally_needed == 0:
-            if len(self.assigned_gpus) > 0:
-                num_gpus_originally_needed = len(self.assigned_gpus)
-            else:
-                return 
+        num_gpus = len(self.assigned_gpus)
+        if num_gpus == 0: return
 
-        mem_per_gpu = self.memory_required / num_gpus_originally_needed
-        util_per_gpu = self.utilization_required / num_gpus_originally_needed
+        mem_per_gpu = self.memory_required / num_gpus
+        util_per_gpu = self.utilization_required / num_gpus
         
         for gpu in self.assigned_gpus:
             gpu.assign_task(self, mem_per_gpu, util_per_gpu)
 
-    def preempt_and_pause(self, gpu_to_release, current_time):
-        self.last_preemption_time = current_time
-        gpu_to_release.release_task(self)
+    # --- (REMOVED preempt_and_pause method) ---
+    # def preempt_and_pause(self, gpu_to_release, current_time): ...
         
-        if gpu_to_release in self.assigned_gpus:
-            self.assigned_gpus.remove(gpu_to_release)
-        
-        for gpu in self.assigned_gpus:
-            gpu.release_task(self)
-
-        if self.assigned_gpus:
-            self._distribute_load()
-
-        self.paused_until = current_time + PREEMPTION_OVERHEAD
-        
-    def reclaim_gpu(self, gpu_to_add, current_time):
-        if gpu_to_add in self.assigned_gpus: return
-
-        for gpu in self.assigned_gpus:
-            gpu.release_task(self)
-
-        self.assigned_gpus.append(gpu_to_add)
-        self._distribute_load()
-        self.paused_until = current_time + RECLAMATION_OVERHEAD
+    # --- (REMOVED reclaim_gpu method) ---
+    # def reclaim_gpu(self, gpu_to_add, current_time): ...
     
     def update_progress(self, time_delta, current_time):
-        if not self.assigned_gpus or current_time < self.paused_until:
+        """Updates remaining work using a normalized speedup factor."""
+        # --- (MODIFIED: Simplified check) ---
+        if not self.assigned_gpus:
             return
         
+        # ** Normalized speedup calculation **
         if self.gpus_needed > 0:
             speedup_factor = len(self.assigned_gpus) / self.gpus_needed
         else:
-            speedup_factor = 1 
+            speedup_factor = 1 # Fallback, should not happen
 
         self.remaining_work -= (time_delta * speedup_factor)
     
@@ -198,21 +187,3 @@ class Job:
     def record_completion(self, current_time):
         self.completion_time = current_time
         self.turnaround_time = self.completion_time - self.arrival_time
-
-    def can_be_preempted(self, current_time, estimated_borrow_time=10.0):
-        if self.start_time == -1 or len(self.assigned_gpus) <= 1:
-            return False
-            
-        work_done_in_ideal_time = self.ideal_duration - self.remaining_work
-        time_elapsed = current_time - self.start_time
-        current_delay_incurred = max(0, time_elapsed - work_done_in_ideal_time)
-
-        future_fixed_delay = PREEMPTION_OVERHEAD + RECLAMATION_OVERHEAD
-        
-        # Simplification for slowdown delay
-        slowdown_delay = estimated_borrow_time / len(self.assigned_gpus)
-
-        total_predicted_delay = current_delay_incurred + future_fixed_delay + slowdown_delay
-        max_allowable_delay = self.max_allowable_duration - self.ideal_duration
-
-        return total_predicted_delay <= max_allowable_delay

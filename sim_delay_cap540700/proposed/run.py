@@ -8,8 +8,8 @@ from components import Job
 import time
 
 # --- NEW: Define Pool Sizes ---
-TRAINING_POOL_SIZE = 600
-INFERENCE_POOL_SIZE = 500
+TRAINING_POOL_SIZE = 700
+INFERENCE_POOL_SIZE = 540
 
 def load_jobs_from_csv(file_path):
     """
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     scheduler = Scheduler(job_workload, cluster, 
                           progress_interval=1000, log_interval=500,
                           start_time=args.start_time, end_time=args.end_time,
-                          tick_duration=1, end_time_threshold=1.2)
+                          tick_duration=1, end_time_threshold=1.8)
     
     scheduler.run_simulation()
     scheduler.print_results()
