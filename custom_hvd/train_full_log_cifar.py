@@ -134,14 +134,14 @@ def main():
                         ST_bcast = time.time()
                         if is_full_world:
                             print('=== Full world case ===')
-                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
-                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
+                            # hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
+                            # hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                         else:
                             print('=== Partial world case ===')
-                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
-                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
+                            # hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
+                            # hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
