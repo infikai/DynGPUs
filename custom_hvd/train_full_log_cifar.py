@@ -243,7 +243,7 @@ def main():
             state.processed_num = 0
             config_changed = True
 
-def read_active_ranks_from_file(filepath='/home/pacs/Kevin/DynGPUs/custom_hvd/active_ranks.txt'):
+def read_active_ranks_from_file(filepath='/home/pacs/Kevin/DynGPUs/custom_hvd/active_workers.txt'):
     try:
         if not os.path.exists(filepath):
             time.sleep(1)
