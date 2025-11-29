@@ -171,11 +171,11 @@ def main():
                 if hvd.rank() == 1:
                         logging.info(f'Throughput: 0 images/second.')
 
-            if hvd.rank() == 0:
-                new_ranks = read_active_ranks_from_file()
-            else:
-                new_ranks = None
-            new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
+            # if hvd.rank() == 0:
+            #     new_ranks = read_active_ranks_from_file()
+            # else:
+            #     new_ranks = None
+            # new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
             if new_ranks != current_active_ranks:
                 # MODIFICATION: Log the worker adjustment event
                 if hvd.rank() == 0:
