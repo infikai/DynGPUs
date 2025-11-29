@@ -78,6 +78,7 @@ class Scheduler:
         
         while jobs_to_assign:
             gpu = None
+            is_reclaimed = False
             
             # --- P1: Existing Server with Slots (Inference Pool) ---
             gpu = self.cluster.find_gpu_for_llm_job(self.clock.current_time)
@@ -108,6 +109,19 @@ class Scheduler:
                     # Convert to LLM server and mark for draining later (when it gets reverted)
                     victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 1000)
                     gpu = victim_gpu
+                    is_reclaimed = True
+
+            # --- P5: Preempt from Training job in Training Pool ---
+            if not gpu:
+                victim_job, victim_gpu = self.cluster.find_training_gpu_to_preempt(self.clock.current_time)
+                if victim_job and victim_gpu:
+                    victim_job.preempt_and_pause(victim_gpu, self.clock.current_time)
+                    self.preemption_map[victim_gpu.gpu_id] = victim_job
+                    self.preemption_count += 1
+
+                    victim_gpu.convert_to_llm_server(drain_at_time=self.clock.current_time + 1000)
+                    gpu = victim_gpu
+                    is_reclaimed = True
 
             if gpu:
                 slots_to_fill = gpu.llm_slots_available
@@ -119,9 +133,16 @@ class Scheduler:
 
                     job = jobs_to_assign.popleft() 
                     
+                    # --- APPLY OVERHEAD IF RECLAIMED ---
+                    if is_reclaimed:
+                        # Only modify remaining_work, not base_duration
+                        job.remaining_work += PREEMPTION_OVERHEAD
+                    
                     job.assigned_gpus = [gpu]
                     job.start_time = self.clock.current_time
                     delay = math.floor(max(0, job.start_time - job.arrival_time))
+                    if is_reclaimed:
+                        delay += PREEMPTION_OVERHEAD
                     if delay > 0:
                         self.current_inference_delays.append(delay)
                     
