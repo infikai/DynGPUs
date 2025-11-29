@@ -270,7 +270,7 @@ def main():
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
 
-                del images, target, output, loss
+                # del images, target, output, loss
                 gc.collect()
                 
                 # Clear CUDA cache to see true drop in usage
