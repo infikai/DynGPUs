@@ -23,8 +23,6 @@ def monitor_gpu_memory(stage, rank):
     Only prints on rank 0 (or specific ranks) to avoid console spam.
     """
     # You can adjust this condition if you want to see logs from other ranks
-    if rank != 0: 
-        return
 
     # Synchronize to ensure all ops are done before measuring
     torch.cuda.synchronize()
