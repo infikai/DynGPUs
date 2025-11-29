@@ -134,14 +134,14 @@ def main():
                         ST_bcast = time.time()
                         if is_full_world:
                             print('=== Full world case ===')
-                            # hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
-                            # hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
+                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
+                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                         else:
                             print('=== Partial world case ===')
-                            # hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
-                            # hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
+                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
+                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
@@ -171,11 +171,11 @@ def main():
                 if hvd.rank() == 1:
                         logging.info(f'Throughput: 0 images/second.')
 
-            # if hvd.rank() == 0:
-            #     new_ranks = read_active_ranks_from_file()
-            # else:
-            #     new_ranks = None
-            # new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
+            if hvd.rank() == 0:
+                new_ranks = read_active_ranks_from_file()
+            else:
+                new_ranks = None
+            new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
             if new_ranks != current_active_ranks:
                 # MODIFICATION: Log the worker adjustment event
                 if hvd.rank() == 0:
@@ -243,7 +243,7 @@ def main():
             state.processed_num = 0
             config_changed = True
 
-def read_active_ranks_from_file(filepath='/mydata/Data/DynGPUs/custom_hvd/active_workers.txt'):
+def read_active_ranks_from_file(filepath='/home/pacs/Kevin/DynGPUs/custom_hvd/active_ranks.txt'):
     try:
         if not os.path.exists(filepath):
             time.sleep(1)
