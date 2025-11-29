@@ -12,6 +12,7 @@ import socket
 from sampler import MyElasticSampler
 import argparse
 import logging
+import gc
 
 # Hyperparameters
 EPOCHS = 90
@@ -268,6 +269,9 @@ def main():
                 
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
+
+                del images, target, output, loss
+                gc.collect()
                 
                 # Clear CUDA cache to see true drop in usage
                 torch.cuda.empty_cache()
