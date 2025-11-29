@@ -249,7 +249,7 @@ def main():
                     if hvd.rank() == 0 and fisrt_batch == True:
                             logging.info(f"First Batch Cost: {time.time() - ST_batch}s")
                     fisrt_batch = False
-                    sleep(2)
+                    time.sleep(2)
                     END_batch = time.time()
 
                     current_time = time.time()
