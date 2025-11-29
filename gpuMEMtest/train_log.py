@@ -264,13 +264,29 @@ def main():
             
             # INACTIVE/OFFLOAD BLOCK
             if hvd.rank() not in current_active_ranks:
-                if hvd_optimizer != None:
+                if hvd_optimizer is not None:
+                    # 1. Clear Grads
                     hvd_optimizer.zero_grad()
+                    # 2. Unregister hooks (Crucial for Horovod to release model refs)
+                    try:
+                        hvd_optimizer._unregister_hooks()
+                    except:
+                        pass
+                    
+                    # 3. Destroy the object explicitly
+                    del hvd_optimizer
+                    hvd_optimizer = None
                 
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
 
-                # del images, target, output, loss
+                try:
+                    del images
+                    del target
+                    del output
+                    del loss
+                except NameError:
+                    pass
                 gc.collect()
                 
                 # Clear CUDA cache to see true drop in usage
