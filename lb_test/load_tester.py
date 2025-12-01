@@ -7,7 +7,7 @@ from statistics import mean, median
 import sys
 
 # Configuration
-DEFAULT_URL = "http://localhost:8000/"
+DEFAULT_URL = "http://localhost:80/"
 
 async def fetch(session, url, request_id):
     """
