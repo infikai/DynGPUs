@@ -1,0 +1,27 @@
+services:
+  backend1:
+    build: .
+    command: python backend.py
+    environment:
+      - SERVER_ID=1
+  backend2:
+    build: .
+    command: python backend.py
+    environment:
+      - SERVER_ID=2
+  backend3:
+    build: .
+    command: python backend.py
+    environment:
+      - SERVER_ID=3
+  
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8000:80"
+    depends_on:
+      - backend1
+      - backend2
+      - backend3
