@@ -41,7 +41,7 @@ async def run_load_test(url, total_requests, concurrency):
     print("-" * 30)
 
     # TCPConnector limits the number of open connections
-    connector = aiohttp.TCPConnector(limit=concurrency)
+    connector = aiohttp.TCPConnector(force_close=True)
     
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = []
