@@ -12,14 +12,13 @@ import numpy as np
 
 
 # --- Global Configuration ---
-STAGE_DURATION_SECONDS = 300  # 10 minutes per stage
+STAGE_DURATION_SECONDS = 300  # 5 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1 (Low Load)": 1,  # 10 RPS
     "Stage 2 (Medium Load)": 3, # 4 server load
     "Stage 3 (High Load)": 2,  # 50 RPS
-    "Stage 4 (High Load)": 4,  # 50 RPS
-    "Stage 5 (High Load)": 2,  # 50 RPS
 }
+REQUEST_READ_TIMEOUT_SECONDS = 600
 
 
 # --- Data Classes ---
@@ -100,11 +99,21 @@ async def process_request(request: Request, api_url: str, model_name: str) -> Re
     
     # Fresh connection/session for every request to ensure distinct traffic
     connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
+    timeout = aiohttp.ClientTimeout(
+        total=None, # No overall timeout limit
+        connect=None, # No connection timeout limit
+        sock_read=REQUEST_READ_TIMEOUT_SECONDS # Timeout between read chunks
+    )
     
     try:
         async with aiohttp.ClientSession(connector=connector) as session:
             # Explicitly set Connection: close header
-            async with session.post(url=api_url, json=payload, headers={"Connection": "close"}) as response:
+            async with session.post(
+                url=api_url, 
+                json=payload, 
+                headers={"Connection": "close"},
+                timeout=timeout  # <--- HERE
+            ) as response:
                 if response.status != 200:
                     print(f"Error: Request {request.request_id} failed with status {response.status} from {api_url}")
                     result.end_time = time.perf_counter()
