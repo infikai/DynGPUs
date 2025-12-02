@@ -149,7 +149,7 @@ def prepare_requests(all_requests: List[Request], stages: Dict[str, int], stage_
     random.seed(seed)
     
     # 1. Calculate total requests needed across all stages
-    total_requests_needed = sum(rps * stage_duration for rps in stages.values())
+    total_requests_needed = int(sum(rps * stage_duration for rps in stages.values()))
     
     if total_requests_needed == 0:
         return []
