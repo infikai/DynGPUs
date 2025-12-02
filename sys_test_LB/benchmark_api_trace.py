@@ -16,7 +16,7 @@ STAGE_DURATION_SECONDS = 600  # 5 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1 (Low Load)": 0.7,  # 10 RPS
     "Stage 2 (Medium Load)": 0.8, # 4 server load
-    "Stage 3 (High Load)": 0.85,  # 50 RPS
+    "Stage 3 (High Load)": 0.8,  # 50 RPS
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
