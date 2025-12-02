@@ -28,8 +28,8 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
 LOAD_HISTORY_SIZE = 5 
-DELTA_HISTORY_SIZE = 5 # <-- UPDATED: Increased delta history size for longer lookback (25 seconds)
-MEDIAN_DELTA_TRIGGER = 0.25 # <-- NEW: Using median, threshold increased to 25% (less aggressive)
+DELTA_HISTORY_SIZE = 5 
+MEDIAN_DELTA_TRIGGER = 0.25
 # ---------------------------------------------------
 
 
@@ -116,7 +116,7 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
     print("\nUpdating Nginx configuration...")
     
     server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
-    upstream_config = "        \n" + "".join(server_lines)
+    upstream_config = "        least_conn;\n" + "".join(server_lines)
     
     try:
         with open(NGINX_TEMPLATE_PATH, "r") as f: 
@@ -291,7 +291,6 @@ async def log_active_servers():
 async def autoscaler_task():
     """
     The main autoscaler loop that polls server metrics and triggers scaling.
-    Uses smoothed load (history) for steady-state scaling and median delta for anticipatory scaling.
     """
     print("🚀 Autoscaler started...")
     last_scaling_time = 0
@@ -322,23 +321,29 @@ async def autoscaler_task():
             load_delta = total_load - last_total_load
             percent_change = load_delta / last_total_load if last_total_load > 0 else 0
             
-            # Use median for smoothing: track positive changes over the history window
             delta_history.append(percent_change if percent_change > 0 else 0)
             if len(delta_history) > DELTA_HISTORY_SIZE:
                 delta_history.pop(0)
             
-            # Calculate the median positive delta
             median_delta = np.median(delta_history) if delta_history else 0
             
             
-            print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers_for_metrics)} | Smoothed Avg: {smoothed_avg_load:.2f} | Median Δ: {median_delta:.0%}", end="")
+            # --- MONITORING OUTPUT (NEW) ---
+            server_details = []
+            for server, metrics in zip(active_servers_for_metrics, metric_results):
+                r = metrics.get('running', 0)
+                w = metrics.get('waiting', 0)
+                server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
 
+            print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
+            print(f"STATUS: Active Servers: {len(active_servers_for_metrics)} | Smoothed Avg Load: {smoothed_avg_load:.2f} | Median Delta: {median_delta:.0%}")
+            print(f"DETAILS: {' | '.join(server_details)}")
+            # -------------------------------
             
             # --- DECISION LOGIC ---
 
             # 1. Median Delta Trigger (Anticipatory Scaling - overrides cooldown)
             if median_delta > MEDIAN_DELTA_TRIGGER and len(active_servers_for_metrics) >= 2:
-                # Scale proportional to the median acceleration
                 num_to_scale = max(1, int(len(active_servers_for_metrics) * median_delta))
                 
                 print(f" (🚀 MEDIAN DELTA SCALE UP by {num_to_scale} servers, Median Δ: {median_delta:.0%})")
