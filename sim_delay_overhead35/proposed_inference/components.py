@@ -40,6 +40,8 @@ class GPU:
         self.drain_at_time = -1 
         self.running_tasks = {}
 
+        self.reclamation_cooldown_timer = 0
+
     def can_fit(self, job):
         return (job.memory_required <= self.available_memory and
                 job.utilization_required <= self.available_utilization)

@@ -89,20 +89,22 @@ class ClusterManager:
         for gpu in job.assigned_gpus:
             gpu.release_task(job)
 
-    def find_training_gpu_to_preempt(self, current_time):
+    def find_training_job_to_preempt_in_training_pool(self, current_time):
         """
-        Finds a training job running on a Training Pool GPU that can be preempted.
+        Finds a Training job running in the TRAINING pool to preempt (P5).
         """
         potential_victims = []
         for gpu in self.training_pool:
-            # We can only preempt GPUs running training jobs, not LLM servers
+            # We look for GPUs running training jobs (not LLM servers, not idle)
             if not gpu.is_llm_server and gpu.running_tasks:
                 training_jobs = gpu.get_running_training_jobs()
                 for job in training_jobs:
                     if current_time > job.last_preemption_time + PREEMPTION_COOLDOWN:
                         if job.can_be_preempted(current_time, estimated_borrow_time=1000.0):
                             potential_victims.append((job, gpu))
+
         if not potential_victims:
             return (None, None)
+        
         potential_victims.sort(key=lambda item: item[0].last_preemption_time)
         return potential_victims[0]
