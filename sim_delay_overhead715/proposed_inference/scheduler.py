@@ -141,7 +141,7 @@ class Scheduler:
                     job.start_time = self.clock.current_time
                     
                     # --- NEW: Delay includes overhead ---
-                    delay = max(0, job.start_time - job.arrival_time) + overhead
+                    delay = math.floor(max(0, job.start_time - job.arrival_time)) + overhead
                     self.current_inference_delays.append(delay)
                     
                     gpu.assign_llm_task(job)
