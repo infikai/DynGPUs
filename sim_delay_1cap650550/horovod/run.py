@@ -120,8 +120,8 @@ if __name__ == "__main__":
 
     simulation_start_time = time.time()
     print("🚀 Starting Simulation...")
-    cluster = ClusterManager(num_training_gpus=700, 
-                             num_inference_gpus=500)
+    cluster = ClusterManager(num_training_gpus=650, 
+                             num_inference_gpus=550)
     
     initial_servers_to_create = 5
     print(f"Pre-warming {initial_servers_to_create} LLM servers...")
