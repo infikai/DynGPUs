@@ -91,8 +91,9 @@ def main():
         device_id = 1
     elif hvd.local_rank() == 1:
         device_id = 0
-    else device_id = hvd.local_rank()
-    
+    else:
+        device_id = hvd.local_rank()
+
     torch.cuda.set_device(device_id)
 
     # [MEMORY] Stage 1: Context Created
