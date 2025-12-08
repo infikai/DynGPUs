@@ -87,7 +87,13 @@ def main():
     print(f'{hostname} binded to horovod rank{hvd.rank()}.')
 
     # Set device
-    torch.cuda.set_device(hvd.local_rank())
+    if hvd.local_rank() == 0:
+        device_id = 1
+    elif hvd.local_rank() == 1:
+        device_id = 0
+    else device_id = hvd.local_rank()
+    
+    torch.cuda.set_device(device_id)
 
     # [MEMORY] Stage 1: Context Created
     monitor_gpu_memory("1. Baseline (Context Created)", hvd.rank())
