@@ -104,9 +104,9 @@ def main():
     ST_model = time.time()
     print(f"==> Using model: {args.model} | Batch Size: {args.batch_size}")
     if args.model == 'resnet50':
-        model = models.resnet50().to(device)
+        model = models.resnet50().cuda()
     elif args.model == 'vit_l_32':
-        model = models.vit_l_32(weights=None).to(device)
+        model = models.vit_l_32(weights=None).cuda()
     else:
         raise ValueError(f"Unsupported model specified: {args.model}")
 
@@ -176,7 +176,7 @@ def main():
                     active_set = process_set_cache[ranks_tuple]
 
                 if hvd.rank() in current_active_ranks:
-                    model.to(device) # Ensure model is on CUDA
+                    model.cuda() # Ensure model is on CUDA
                     root_rank_for_sync = 0
                     if sync:
                         ST_bcast = time.time()
@@ -233,7 +233,7 @@ def main():
                 try:
                     ST_batch = time.time()
                     images, target = next(data_iterator)
-                    images, target = images.to(device), target.to(device)
+                    images, target = images.cuda(), target.cuda()
                     hvd_optimizer.zero_grad()
                     output = model(images)
                     loss = F.cross_entropy(output, target)
