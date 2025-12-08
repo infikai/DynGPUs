@@ -96,15 +96,17 @@ def main():
 
     torch.cuda.set_device(device_id)
 
+    device = torch.device(f'cuda:{device_id}')
+
     # [MEMORY] Stage 1: Context Created
     monitor_gpu_memory("1. Baseline (Context Created)", hvd.rank())
 
     ST_model = time.time()
     print(f"==> Using model: {args.model} | Batch Size: {args.batch_size}")
     if args.model == 'resnet50':
-        model = models.resnet50().cuda()
+        model = models.resnet50().to(device)
     elif args.model == 'vit_l_32':
-        model = models.vit_l_32(weights=None).cuda()
+        model = models.vit_l_32(weights=None).to(device)
     else:
         raise ValueError(f"Unsupported model specified: {args.model}")
 
@@ -174,7 +176,7 @@ def main():
                     active_set = process_set_cache[ranks_tuple]
 
                 if hvd.rank() in current_active_ranks:
-                    model.cuda() # Ensure model is on CUDA
+                    model.to(device) # Ensure model is on CUDA
                     root_rank_for_sync = 0
                     if sync:
                         ST_bcast = time.time()
@@ -231,7 +233,7 @@ def main():
                 try:
                     ST_batch = time.time()
                     images, target = next(data_iterator)
-                    images, target = images.cuda(), target.cuda()
+                    images, target = images.to(device), target.to(device)
                     hvd_optimizer.zero_grad()
                     output = model(images)
                     loss = F.cross_entropy(output, target)
