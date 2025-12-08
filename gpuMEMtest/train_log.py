@@ -88,11 +88,11 @@ def main():
 
     # Set device
     if hvd.local_rank() == 0:
-        device_id = 1
+        device_id = 2
     elif hvd.local_rank() == 1:
-        device_id = 0
-    else:
-        device_id = hvd.local_rank()
+        device_id = 1
+    elif hvd.local_rank() == 2:
+        device_id = 3
 
     torch.cuda.set_device(device_id)
 
