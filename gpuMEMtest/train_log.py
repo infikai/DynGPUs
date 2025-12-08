@@ -28,7 +28,13 @@ def monitor_gpu_memory(stage, rank):
     # Synchronize to ensure all ops are done before measuring
     torch.cuda.synchronize()
     
-    local_rank = hvd.local_rank()
+    # local_rank = hvd.local_rank()
+    if hvd.local_rank() == 0:
+        local_rank = 1
+    elif hvd.local_rank() == 1:
+        local_rank = 2
+    elif hvd.local_rank() == 2:
+        local_rank = 0
     
     # Get raw data
     try:
