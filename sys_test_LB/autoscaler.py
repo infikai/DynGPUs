@@ -36,10 +36,9 @@ MEDIAN_DELTA_TRIGGER = 0.25
 # --- 🖥️ Server State Management (Retained) ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
-    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 8, "shared": True},
-    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 9, "shared": True},
-    {"host": "localhost", "port": 8002, "status": "sleeping", "rank": 10, "shared": True},
-    {"host": "localhost", "port": 8003, "status": "active", "shared": False},
+    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 1, "shared": True},
+    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 2, "shared": True},
+    {"host": "localhost", "port": 8002, "status": "sleeping", "rank": 3, "shared": True},
 ]
 
 
