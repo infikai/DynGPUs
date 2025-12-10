@@ -380,10 +380,9 @@ async def autoscaler_task():
             last_total_load = total_load
             last_total_waiting = total_waiting
 
-
-# --- Main Execution ---
-
-if __name__ == "__main__":
+async def startup():
+    """Performs asynchronous setup tasks before starting the main loop."""
+    # AWAIT the configuration update
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
 
@@ -392,6 +391,24 @@ if __name__ == "__main__":
     loop.create_task(autoscaler_task())
     
     try:
+        # NOTE: loop.run_forever() is used here because we are already inside
+        # the asyncio context started by asyncio.run() below.
+        # We start the loop here to allow the program to run indefinitely.
         loop.run_forever()
     except KeyboardInterrupt:
         print("\nAutoscaler stopped by user.")
+
+# --- Main Execution ---
+
+if __name__ == "__main__":
+    
+    # NEW: Run the async startup function.
+    # This executes the setup logic (including the awaited Nginx update)
+    # and then starts the main event loop via loop.run_forever().
+    try:
+        asyncio.run(startup())
+    except KeyboardInterrupt:
+        pass # Keyboard interrupt already handled inside startup()
+    except RuntimeError:
+        # Catch RuntimeError if loop is already running (rare, but possible in some environments)
+        pass
