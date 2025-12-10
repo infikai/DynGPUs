@@ -119,7 +119,7 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
     print("\nUpdating Nginx configuration...")
     
     server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
-    upstream_config = "        least_conn;\n" + "".join(server_lines)
+    upstream_config = "        #least_conn;\n" + "".join(server_lines)
     
     try:
         with open(NGINX_TEMPLATE_PATH, "r") as f: 
@@ -128,7 +128,7 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
         with open(NGINX_CONF_PATH, "w") as f: 
             f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
             
-        print(f"Nginx config updated with {len(active_servers)} active servers (using 'least_conn').")
+        print(f"Nginx config updated with {len(active_servers)} active servers (not using 'least_conn').")
         return True
     except Exception as e:
         print(f"\nERROR: Failed to write Nginx config: {e}")
