@@ -20,7 +20,7 @@ SCALE_UP_THRESHOLD = 25
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 30
-MONITOR_INTERVAL_SECONDS = 2
+MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 120
 GPU_MEMORY_FREE_THRESHOLD_MB = 3000
 GPU_FREE_TIMEOUT_SECONDS = 15
@@ -382,7 +382,7 @@ async def autoscaler_task():
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    if update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
+    if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
 
     loop = asyncio.get_event_loop()
