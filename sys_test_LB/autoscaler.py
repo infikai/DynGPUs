@@ -300,6 +300,7 @@ async def autoscaler_task():
     load_history = []
     delta_history = []
     last_total_load = 0
+    last_total_waiting = 0
     
     async with httpx.AsyncClient() as client:
         while True:
