@@ -108,7 +108,7 @@ async def process_request(request: Request, api_url: str, model_name: str) -> Re
     )
     
     try:
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.DummyCookieJar()) as session:
             # Explicitly set Connection: close header
             async with session.post(
                 url=api_url, 
