@@ -12,7 +12,7 @@ import numpy as np
 
 
 # --- Global Configuration ---
-STAGE_DURATION_SECONDS = 3600  # 5 minutes per stage
+STAGE_DURATION_SECONDS = 4000  # 5 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1 (Low Load)": 0.45
 }
