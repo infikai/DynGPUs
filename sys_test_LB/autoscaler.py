@@ -355,7 +355,6 @@ async def autoscaler_task():
                         
             # --- END OF CYCLE ---
             last_total_load = total_load
-            last_total_waiting = total_waiting
 
 async def startup_tasks():
     """Performs asynchronous setup and starts the recurring tasks."""
