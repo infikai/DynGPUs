@@ -380,35 +380,38 @@ async def autoscaler_task():
             last_total_load = total_load
             last_total_waiting = total_waiting
 
-async def startup():
-    """Performs asynchronous setup tasks before starting the main loop."""
+async def startup_tasks():
+    """Performs asynchronous setup and starts the recurring tasks."""
+    
     # AWAIT the configuration update
     if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_nginx()
-
+    
+    # Get the loop once the async environment is active
     loop = asyncio.get_event_loop()
+    
+    # Start the background tasks
     loop.create_task(log_active_servers())
     loop.create_task(autoscaler_task())
     
-    try:
-        # NOTE: loop.run_forever() is used here because we are already inside
-        # the asyncio context started by asyncio.run() below.
-        # We start the loop here to allow the program to run indefinitely.
-        loop.run_forever()
-    except KeyboardInterrupt:
-        print("\nAutoscaler stopped by user.")
+    # NEW: Create a never-ending future to keep the loop alive indefinitely.
+    # The autoscaler logic runs on the tasks created above.
+    await asyncio.Future() 
+
 
 # --- Main Execution ---
 
 if __name__ == "__main__":
     
-    # NEW: Run the async startup function.
-    # This executes the setup logic (including the awaited Nginx update)
-    # and then starts the main event loop via loop.run_forever().
     try:
-        asyncio.run(startup())
+        # Run the async startup function.
+        # This executes the setup, starts the background tasks, and hits 'await asyncio.Future()', 
+        # which keeps the loop running until an external signal (like KeyboardInterrupt).
+        asyncio.run(startup_tasks())
     except KeyboardInterrupt:
-        pass # Keyboard interrupt already handled inside startup()
-    except RuntimeError:
-        # Catch RuntimeError if loop is already running (rare, but possible in some environments)
-        pass
+        print("\nAutoscaler stopped by user.")
+    except RuntimeError as e:
+        if "cannot run forever" in str(e):
+            print("\nError: The event loop was shut down unexpectedly. Stopping autoscaler.")
+        else:
+            raise
