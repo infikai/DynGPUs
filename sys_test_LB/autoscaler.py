@@ -20,7 +20,7 @@ SCALE_UP_THRESHOLD = 25
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 60
-MONITOR_INTERVAL_SECONDS = 5
+MONITOR_INTERVAL_SECONDS = 2
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 5000
 GPU_FREE_TIMEOUT_SECONDS = 15
@@ -36,9 +36,9 @@ MEDIAN_DELTA_TRIGGER = 0.25
 # --- 🖥️ Server State Management (Retained) ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
-    {"host": "localhost", "port": 8000, "status": "active", "rank": 1, "shared": True},
-    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 2, "shared": True},
-    {"host": "localhost", "port": 8002, "status": "sleeping", "rank": 3, "shared": True},
+    {"host": "localhost", "port": 8000, "status": "active", "rank": 2, "shared": True},
+    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 0, "shared": True},
+    {"host": "localhost", "port": 8002, "status": "sleeping", "rank": 5, "shared": True},
 ]
 
 
