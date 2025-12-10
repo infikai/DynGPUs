@@ -27,7 +27,7 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 30
+LOAD_HISTORY_SIZE = 20
 DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
 # ---------------------------------------------------
@@ -321,8 +321,9 @@ async def autoscaler_task():
             smoothed_avg_load = np.mean(load_history)
             
             # --- DELTA Calculation and Smoothing ---
-            load_delta = total_load - last_total_load
-            percent_change = load_delta / last_total_load if last_total_load > 0 else 0
+            total_waiting = sum(r['waiting'] for r in metric_results)
+            load_delta = total_waiting - last_total_waiting
+            percent_change = load_delta / last_total_waiting if last_total_waiting > 0 else 0
             
             delta_history.append(percent_change if percent_change > 0 else 0)
             if len(delta_history) > DELTA_HISTORY_SIZE:
@@ -377,6 +378,7 @@ async def autoscaler_task():
                         
             # --- END OF CYCLE ---
             last_total_load = total_load
+            last_total_waiting = total_waiting
 
 
 # --- Main Execution ---
