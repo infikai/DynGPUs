@@ -16,7 +16,7 @@ STAGE_DURATION_SECONDS = 300  # 5 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1 (Low Load)": 0.7,
     "Stage 2 (Low Load)": 0.35,
-    "Stage 3 (Low Load)": 1.05,
+    "Stage 3 (Low Load)": 1,
     "Stage 4 (Low Load)": 0.7,
     "Stage 5 (Low Load)": 0.35,
 }
