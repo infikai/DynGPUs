@@ -321,18 +321,6 @@ async def autoscaler_task():
                 load_history.pop(0)
             smoothed_avg_load = np.mean(load_history)
             
-            # --- DELTA Calculation and Smoothing ---
-            total_waiting = sum(r['waiting'] for r in metric_results)
-            load_delta = total_waiting - last_total_waiting
-            percent_change = load_delta / last_total_waiting if last_total_waiting > 0 else 0
-            
-            delta_history.append(percent_change if percent_change > 0 else 0)
-            if len(delta_history) > DELTA_HISTORY_SIZE:
-                delta_history.pop(0)
-            
-            median_delta = np.median(delta_history) if delta_history else 0
-            
-            
             # --- MONITORING OUTPUT (NEW) ---
             server_details = []
             for server, metrics in zip(active_servers_for_metrics, metric_results):
@@ -341,25 +329,13 @@ async def autoscaler_task():
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
 
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
-            print(f"STATUS: Active Servers: {len(active_servers_for_metrics)} | Smoothed Avg Load: {smoothed_avg_load:.2f} | Median Delta: {median_delta:.0%}")
+            print(f"STATUS: Active Servers: {len(active_servers_for_metrics)} | Smoothed Avg Load: {smoothed_avg_load:.2f}")
             print(f"DETAILS: {' | '.join(server_details)}")
             # -------------------------------
             
             # --- DECISION LOGIC ---
-
-            # 1. Median Delta Trigger (Anticipatory Scaling - overrides cooldown)
-            if median_delta > MEDIAN_DELTA_TRIGGER and len(active_servers_for_metrics) >= 2:
-                num_to_scale = max(1, int(len(active_servers_for_metrics) * median_delta))
-                
-                print(f" (🚀 MEDIAN DELTA SCALE UP by {num_to_scale} servers, Median Δ: {median_delta:.0%})")
-                if await scale_up(count=num_to_scale):
-                    load_history = [] 
-                    delta_history = []
-                    last_scaling_time = time.time()
-                
-            
-            # 2. Absolute Threshold Trigger (Normal Scaling - respects cooldown)
-            elif (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
+            # 1. Absolute Threshold Trigger (Normal Scaling - respects cooldown)
+            if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
                 if smoothed_avg_load < SCALE_DOWN_THRESHOLD:
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
