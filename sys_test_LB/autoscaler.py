@@ -119,7 +119,7 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
     print("\nUpdating Nginx configuration...")
     
     server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
-    upstream_config = "        #least_conn;\n" + "".join(server_lines)
+    upstream_config = "        least_conn;\n" + "".join(server_lines)
     
     try:
         with open(NGINX_TEMPLATE_PATH, "r") as f: 
@@ -128,7 +128,7 @@ async def update_nginx_config(active_servers: List[Dict]) -> bool:
         with open(NGINX_CONF_PATH, "w") as f: 
             f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
             
-        print(f"Nginx config updated with {len(active_servers)} active servers (not using 'least_conn').")
+        print(f"Nginx config updated with {len(active_servers)} active servers (using 'least_conn').")
         return True
     except Exception as e:
         print(f"\nERROR: Failed to write Nginx config: {e}")
@@ -337,7 +337,7 @@ async def autoscaler_task():
             # 1. Absolute Threshold Trigger (Normal Scaling - respects cooldown)
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
-                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1) < (SCALE_UP_THRESHOLD-5):
+                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+5 < SCALE_UP_THRESHOLD:
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
@@ -345,7 +345,7 @@ async def autoscaler_task():
                     if await scale_down(count=num_to_scale): 
                         last_scaling_time = time.time()
                         
-                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1)) > (SCALE_DOWN_THRESHOLD+5):
+                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1))-5 > SCALE_DOWN_THRESHOLD:
                     deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
