@@ -9,6 +9,10 @@ events {
 }
 
 http {
+    log_format upstream_time '$remote_addr - [$time_local] '
+                             '"$request" $status $body_bytes_sent '
+                             'rt=$request_time uct="$upstream_connect_time" urt="$upstream_response_time" '
+                             'upstream_addr="$upstream_addr"';
     upstream inference_servers {
         # This block will be filled in by the Python script
 {UPSTREAM_SERVERS}
