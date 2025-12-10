@@ -21,7 +21,7 @@ SCALE_UP_THRESHOLD = 25
 MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 30
 MONITOR_INTERVAL_SECONDS = 2
-GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 120
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
 GPU_MEMORY_FREE_THRESHOLD_MB = 3000
 GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
@@ -337,7 +337,7 @@ async def autoscaler_task():
             # 1. Absolute Threshold Trigger (Normal Scaling - respects cooldown)
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
-                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1) < SCALE_UP_THRESHOLD:
+                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1) < (SCALE_UP_THRESHOLD-5):
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
@@ -345,7 +345,7 @@ async def autoscaler_task():
                     if await scale_down(count=num_to_scale): 
                         last_scaling_time = time.time()
                         
-                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and total_load / (len(active_servers_for_metrics)+1) > SCALE_DOWN_THRESHOLD:
+                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1)) > (SCALE_DOWN_THRESHOLD+5):
                     deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
