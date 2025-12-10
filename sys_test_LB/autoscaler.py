@@ -76,7 +76,7 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
     start_time = time.time()
     while (time.time() - start_time) < GPU_FREE_TIMEOUT_SECONDS:
         try:
-            async with asyncssh.connect(server['host']) as conn:
+            async with asyncssh.connect(server['host'], username='pacs') as conn:
                 result = await conn.run(command, check=True)
                 memory_used_mb = int(result.stdout.strip())
                 
