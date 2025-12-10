@@ -345,7 +345,7 @@ async def autoscaler_task():
                     if await scale_down(count=num_to_scale): 
                         last_scaling_time = time.time()
                         
-                elif smoothed_avg_load > SCALE_UP_THRESHOLD:
+                elif smoothed_avg_load > SCALE_UP_THRESHOLD and total_load / (len(active_servers_for_metrics)+1) > SCALE_DOWN_THRESHOLD:
                     deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
