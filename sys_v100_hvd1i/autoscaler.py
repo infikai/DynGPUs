@@ -37,7 +37,7 @@ MEDIAN_DELTA_TRIGGER = 0.25
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
     # {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
-    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    # {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
 
