@@ -18,7 +18,6 @@ BENCHMARK_STAGES = {
     "Stage 2 (Low Load)": 0.35,
     "Stage 3 (High Load)": 0.7,
     "Stage 4 (Low Load)": 0.35,
-    "Stage 5 (High Load)": 0.7,
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
