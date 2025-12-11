@@ -42,7 +42,7 @@ def main():
                             datefmt='%Y-%m-%d %H:%M:%S')
         logging.info("Starting training run.")
 
-    if hvd.rank() == 1:
+    if hvd.rank() == 0:
         logging.basicConfig(filename='throughput.log',
                             level=logging.INFO,
                             format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
@@ -88,7 +88,7 @@ def main():
 
         while True:
             if config_changed:
-                if hvd.rank() == 1:
+                if hvd.rank() == 0:
                         logging.info(f'Throughput: 0 images/second.')
                 print("Config changing")
                 ST_config = time.time()
@@ -168,7 +168,7 @@ def main():
                     logging.info(f"Configuration change took {config_change_duration:.4f} seconds. Sync required: {sync}")
 
                 config_changed = False
-                if hvd.rank() == 1:
+                if hvd.rank() == 0:
                         logging.info(f'Throughput: 0 images/second.')
 
             if hvd.rank() == 0:
@@ -219,7 +219,7 @@ def main():
                         logging.info(f"Progress - Epoch: {state.epoch}, Processed: {processed}")
                         last_log_time = current_time
                     throughput = images / (END_batch - ST_batch)
-                    if hvd.rank() == 1:
+                    if hvd.rank() == 0:
                         logging.info(f'Throughput: {throughput} images/second.')
 
                 except StopIteration:
