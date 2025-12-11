@@ -36,12 +36,12 @@ def main():
     hvd.init(process_sets="dynamic")
 
     # MODIFICATION: Set up logging on the root rank
-    if hvd.rank() == 0:
-        logging.basicConfig(filename='worker_adjustments.log',
-                            level=logging.INFO,
-                            format='%(asctime)s - %(message)s',
-                            datefmt='%Y-%m-%d %H:%M:%S')
-        logging.info("Starting training run.")
+    # if hvd.rank() == 0:
+    #     logging.basicConfig(filename='worker_adjustments.log',
+    #                         level=logging.INFO,
+    #                         format='%(asctime)s - %(message)s',
+    #                         datefmt='%Y-%m-%d %H:%M:%S')
+    #     logging.info("Starting training run.")
 
     if hvd.rank() == 0:
         logging.basicConfig(filename='throughput.log',
@@ -165,8 +165,8 @@ def main():
                 print(f'Config Change Cost: {config_change_duration}s')
                 
                 # MODIFICATION: Log the config change time cost and sync status
-                if hvd.rank() == 0:
-                    logging.info(f"Configuration change took {config_change_duration:.4f} seconds. Sync required: {sync}")
+                # if hvd.rank() == 0:
+                #     logging.info(f"Configuration change took {config_change_duration:.4f} seconds. Sync required: {sync}")
 
                 config_changed = False
                 if hvd.rank() == 0:
@@ -179,8 +179,8 @@ def main():
             new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
             if new_ranks != current_active_ranks:
                 # MODIFICATION: Log the worker adjustment event
-                if hvd.rank() == 0:
-                    logging.info(f"Adjusting workers. Previous: {sorted(current_active_ranks)}, New: {sorted(new_ranks)}")
+                # if hvd.rank() == 0:
+                #     logging.info(f"Adjusting workers. Previous: {sorted(current_active_ranks)}, New: {sorted(new_ranks)}")
                 config_changed = True
                 break
 
@@ -209,8 +209,8 @@ def main():
                     if hvd.rank() == current_active_ranks[0]:
                         print(f"Epoch: {state.epoch} | Batch: {state.batch_idx-1} | Loss: {loss.item():.4f}")
                         
-                    if hvd.rank() == 0 and fisrt_batch == True:
-                            logging.info(f"First Batch Cost: {time.time() - ST_batch}s")
+                    # if hvd.rank() == 0 and fisrt_batch == True:
+                    #         logging.info(f"First Batch Cost: {time.time() - ST_batch}s")
                     fisrt_batch = False
                     END_batch = time.time()
 
