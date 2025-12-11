@@ -157,10 +157,10 @@ def main():
     model.cpu()
     
     # 4. Delete CUDA tensors (images/targets)
-    del images
-    del target
-    del output
-    del loss
+    # del images
+    # del target
+    # del output
+    # del loss
     
     # 5. Empty Cache
     torch.cuda.empty_cache()
