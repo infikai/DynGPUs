@@ -36,7 +36,7 @@ def monitor_gpu_memory(stage, rank):
     elif hvd.local_rank() == 2:
         local_rank = 0
     else:
-        device_id = hvd.local_rank()
+        local_rank = hvd.local_rank()
     
     # Get raw data
     try:
