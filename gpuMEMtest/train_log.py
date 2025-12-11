@@ -35,6 +35,8 @@ def monitor_gpu_memory(stage, rank):
         local_rank = 2
     elif hvd.local_rank() == 2:
         local_rank = 0
+    else:
+        device_id = hvd.local_rank()
     
     # Get raw data
     try:
@@ -99,7 +101,9 @@ def main():
         device_id = 2
     elif hvd.local_rank() == 2:
         device_id = 0
-
+    else:
+        device_id = hvd.local_rank()
+    
     torch.cuda.set_device(device_id)
 
     device = torch.device(f'cuda:{device_id}')
