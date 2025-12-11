@@ -28,5 +28,13 @@ http {
             proxy_set_header Connection "";
             proxy_pass http://inference_servers;
         }
+        location /nginx_status {
+        # Directive to turn on the status page
+        stub_status;
+
+        # **IMPORTANT: Only allow access from localhost or your monitoring IPs**
+        allow 127.0.0.1;
+        deny all;
+    }
     }
 }
