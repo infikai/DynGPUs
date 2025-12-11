@@ -71,7 +71,7 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
 
     print(f"\nWaiting for GPU memory to be freed for rank {server['rank']} on {server['host']}...")
     local_gpu_id = server['rank'] % 4
-    command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id}"
+    command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id+1}"
     
     start_time = time.time()
     while (time.time() - start_time) < GPU_FREE_TIMEOUT_SECONDS:
