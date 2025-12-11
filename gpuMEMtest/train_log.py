@@ -247,18 +247,18 @@ def main():
                     hvd_optimizer.zero_grad()
                     output = model(images)
                     if fisrt_batch:
-                         monitor_gpu_memory("3. Training (Activations + Grads)", hvd.rank())
+                         monitor_gpu_memory("3.1 Training (Activations + Grads)", hvd.rank())
                     loss = F.cross_entropy(output, target)
                     if fisrt_batch:
-                         monitor_gpu_memory("3. Training (Activations + Grads)", hvd.rank())
+                         monitor_gpu_memory("3.2 Training (Activations + Grads)", hvd.rank())
                     loss.backward()
                     if fisrt_batch:
-                         monitor_gpu_memory("3. Training (Activations + Grads)", hvd.rank())
+                         monitor_gpu_memory("3.3 Training (Activations + Grads)", hvd.rank())
                     hvd_optimizer.step()
                     
                     # [MEMORY] Stage 3: Training (First batch of new config)
                     if fisrt_batch:
-                         monitor_gpu_memory("3. Training (Activations + Grads)", hvd.rank())
+                         monitor_gpu_memory("3.4 Training (Activations + Grads)", hvd.rank())
 
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
                     sampler.record_batch(state.batch_idx, args.batch_size)
