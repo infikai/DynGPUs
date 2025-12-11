@@ -15,7 +15,7 @@ import numpy as np
 STAGE_DURATION_SECONDS = 500  # 5 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1 (Low Load)": 0.75,
-    "Stage 2 (Low Load)": 0.35,
+    "Stage 2 (Low Load)": 0.3,
     "Stage 3 (Low Load)": 1,
     "Stage 4 (Low Load)": 0.35,
     "Stage 5 (Low Load)": 0.70,
