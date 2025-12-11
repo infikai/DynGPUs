@@ -244,6 +244,8 @@ def main():
                     ST_batch = time.time()
                     images, target = next(data_iterator)
                     images, target = images.cuda(), target.cuda()
+                    if fisrt_batch:
+                         monitor_gpu_memory("3.0 Training (Activations + Grads)", hvd.rank())
                     hvd_optimizer.zero_grad()
                     output = model(images)
                     if fisrt_batch:
