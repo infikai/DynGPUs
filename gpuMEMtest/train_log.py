@@ -246,9 +246,14 @@ def main():
                     images, target = images.cuda(), target.cuda()
                     hvd_optimizer.zero_grad()
                     output = model(images)
+                    if fisrt_batch:
+                         monitor_gpu_memory("3. Training (Activations + Grads)", hvd.rank())
                     loss = F.cross_entropy(output, target)
+                    if fisrt_batch:
+                         monitor_gpu_memory("3. Training (Activations + Grads)", hvd.rank())
                     loss.backward()
-                    
+                    if fisrt_batch:
+                         monitor_gpu_memory("3. Training (Activations + Grads)", hvd.rank())
                     hvd_optimizer.step()
                     
                     # [MEMORY] Stage 3: Training (First batch of new config)
