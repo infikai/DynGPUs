@@ -198,8 +198,10 @@ def main():
                             print('=== Full world case ===')
                             hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
                             monitor_gpu_memory("Test0.1", hvd.rank())
+                            time.sleep(2)
                             hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
                             monitor_gpu_memory("Test0.2", hvd.rank())
+                            time.sleep(2)
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                         else:
@@ -210,6 +212,7 @@ def main():
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
                     monitor_gpu_memory("Test1", hvd.rank())
+                    time.sleep(2)
 
                     if hvd_optimizer != None:
                         hvd_optimizer._unregister_hooks()
