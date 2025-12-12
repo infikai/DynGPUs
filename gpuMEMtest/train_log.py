@@ -188,6 +188,7 @@ def main():
                     active_set = process_set_cache[ranks_tuple]
                 
 
+                monitor_gpu_memory("Test0", hvd.rank())
                 if hvd.rank() in current_active_ranks:
                     model.cuda() # Ensure model is on CUDA
                     root_rank_for_sync = 0
