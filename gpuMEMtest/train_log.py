@@ -186,6 +186,7 @@ def main():
                     if needs_creation_sum.item() > 0:
                         process_set_cache[ranks_tuple] = hvd.add_process_set(current_active_ranks)
                     active_set = process_set_cache[ranks_tuple]
+                monitor_gpu_memory("Test", hvd.rank())
 
                 if hvd.rank() in current_active_ranks:
                     model.cuda() # Ensure model is on CUDA
