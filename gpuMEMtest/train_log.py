@@ -197,7 +197,9 @@ def main():
                         if is_full_world:
                             print('=== Full world case ===')
                             hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
+                            monitor_gpu_memory("Test0.1", hvd.rank())
                             hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
+                            monitor_gpu_memory("Test0.2", hvd.rank())
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                         else:
