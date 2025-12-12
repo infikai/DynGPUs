@@ -153,11 +153,13 @@ def main():
                 fisrt_batch = True
                 sync = True
 
+                monitor_gpu_memory("2.1 before bcast", hvd.rank())
                 if hvd.rank() == 0:
                     active_ranks = read_active_ranks_from_file()
                 else:
                     active_ranks = None
                 active_ranks = hvd.broadcast_object(active_ranks, root_rank=0, name="ranks_bcast")
+                monitor_gpu_memory("2.1 after bcast", hvd.rank())
 
                 old_active_ranks = current_active_ranks
                 print(f'Old ranks: {old_active_ranks}')
