@@ -186,7 +186,7 @@ def main():
                     if needs_creation_sum.item() > 0:
                         process_set_cache[ranks_tuple] = hvd.add_process_set(current_active_ranks)
                     active_set = process_set_cache[ranks_tuple]
-                monitor_gpu_memory("Test", hvd.rank())
+                
 
                 if hvd.rank() in current_active_ranks:
                     model.cuda() # Ensure model is on CUDA
@@ -206,6 +206,7 @@ def main():
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
                             print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                     print('==='*5)
+                    monitor_gpu_memory("Test1", hvd.rank())
 
                     if hvd_optimizer != None:
                         hvd_optimizer._unregister_hooks()
@@ -223,6 +224,7 @@ def main():
 
                 config_change_duration = time.time() - ST_config
                 print(f'Config Change Cost: {config_change_duration}s')
+                monitor_gpu_memory("Test2", hvd.rank())
                 
                 if hvd.rank() == 0:
                     logging.info(f"Configuration change took {config_change_duration:.4f} seconds. Sync required: {sync}")
