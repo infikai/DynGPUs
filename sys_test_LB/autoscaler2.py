@@ -130,7 +130,7 @@ async def update_haproxy_config(active_servers: List[Dict]) -> bool:
     # Create a list of HAProxy server lines
     # The 'check' directive ensures HAProxy performs health checks on the backend.
     server_lines = [
-        f"    server web{i:02d} {s['host']}:{s['port']} check inter 2s rise 3 fall 3\n"
+        f"    server web{i:02d} {s['host']}:{s['port']}\n"
         for i, s in enumerate(active_servers, start=1)
     ]
     
