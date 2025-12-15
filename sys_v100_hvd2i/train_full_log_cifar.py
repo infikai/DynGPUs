@@ -81,10 +81,10 @@ def main():
     # MODIFICATION: Initialize timer for periodic logging
     last_log_time = time.time()
     processed = 0
+    config_changed = True
 
     # Train
-    while state.epoch < EPOCHS:
-        config_changed = True
+    while state.epoch < EPOCHS:           
         epoch_finished = 0
 
         while True:
@@ -262,7 +262,10 @@ def main():
             state.epoch += 1
             state.batch_idx = 0
             state.processed_num = 0
-            config_changed = True
+            sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
+            loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
+            data_iterator = iter(loader)
+            # config_changed = True
 
 def read_active_ranks_from_file(filepath='/home/pacs/Kevin/DynGPUs/sys_v100_hvd2i/active_workers.txt'):
     try:
