@@ -41,10 +41,9 @@ ISOLATION_DURATION_SECONDS = 300
 # --- 🖥️ Server State Management (Retained) ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
-    {"host": "10.10.3.1", "port": 8000, "status": "sleeping", "rank": 8, "shared": True},
-    {"host": "10.10.3.1", "port": 8001, "status": "sleeping", "rank": 9, "shared": True},
-    {"host": "10.10.3.1", "port": 8002, "status": "sleeping", "rank": 10, "shared": True},
-    {"host": "10.10.3.1", "port": 8003, "status": "active", "shared": False},
+    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
+    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
 
 
