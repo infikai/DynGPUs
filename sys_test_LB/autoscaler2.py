@@ -161,6 +161,17 @@ def reload_haproxy():
 update_nginx_config = update_haproxy_config # Alias the old name to the new function
 reload_nginx = reload_haproxy # Alias the old name to the new function
 
+async def set_server_sleep_state(server: Dict, sleep: bool):
+    """Sends a POST request to put a server to sleep or wake it up."""
+    action, url = ("Putting to sleep", f"http://{server['host']}:{server['port']}/sleep?level=1") if sleep else \
+                  ("Waking up", f"http://{server['host']}:{server['port']}/wake_up")
+    print(f"{action}: {server['host']}:{server['port']}")
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(url, timeout=20)
+    except httpx.RequestError as e:
+        print(f"\nERROR: Could not send command to server {server['host']}:{server['port']}: {e}")
+
 
 # --- Scaling Logic (Retained, now using HAProxy aliases) ---
 
