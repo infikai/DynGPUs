@@ -262,10 +262,7 @@ def main():
             state.epoch += 1
             state.batch_idx = 0
             state.processed_num = 0
-            sampler.set_epoch(state.epoch, state.processed_num, num_replicas=len(current_active_ranks), rank=local_rank)
-            loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=4, sampler=sampler)
-            data_iterator = iter(loader)
-            # config_changed = True
+            config_changed = True
 
 def read_active_ranks_from_file(filepath='/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt'):
     try:
