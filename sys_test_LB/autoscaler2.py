@@ -12,29 +12,25 @@ from typing import List, Dict
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg"  # The file to be overwritten
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template" # The template file
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
-ACTIVE_WORKERS_FILE = "/mydata/Data/DynGPUs/custom_hvd/active_workers.txt"
+ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/custom_hvd/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 35
-SCALE_UP_THRESHOLD = 45
+SCALE_DOWN_THRESHOLD = 15
+SCALE_UP_THRESHOLD = 25
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
-SCALING_COOLDOWN_SECONDS = 60
-MONITOR_INTERVAL_SECONDS = 5
-GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
-GPU_MEMORY_FREE_THRESHOLD_MB = 5000
+SCALING_COOLDOWN_SECONDS = 15
+MONITOR_INTERVAL_SECONDS = 3
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
+GPU_MEMORY_FREE_THRESHOLD_MB = 3000
 GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 5 
-DELTA_HISTORY_SIZE = 5 
+LOAD_HISTORY_SIZE = 10
+DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
-
-# --- Disparity Isolation Rules ---
-ISOLATION_THRESHOLD_FACTOR = 5.0
-ISOLATION_DURATION_SECONDS = 300
 # -------------------------------------
 
 
@@ -417,20 +413,9 @@ async def autoscaler_task():
             # --- DECISION LOGIC ---
 
             # 1. Median Delta Trigger (Anticipatory Scaling - overrides cooldown)
-            if median_delta > MEDIAN_DELTA_TRIGGER and len(active_servers_for_metrics) >= 2:
-                num_to_scale = max(1, int(len(active_servers_for_metrics) * median_delta))
+            if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
-                print(f" (🚀 MEDIAN DELTA SCALE UP by {num_to_scale} servers, Median Δ: {median_delta:.0%})")
-                if await scale_up(count=num_to_scale):
-                    load_history = [] 
-                    delta_history = []
-                    last_scaling_time = time.time()
-                
-            
-            # 2. Absolute Threshold Trigger (Normal Scaling - respects cooldown)
-            elif (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
-                
-                if smoothed_avg_load < SCALE_DOWN_THRESHOLD:
+                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+3 < SCALE_UP_THRESHOLD:
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
@@ -438,7 +423,7 @@ async def autoscaler_task():
                     if await scale_down(count=num_to_scale): 
                         last_scaling_time = time.time()
                         
-                elif smoothed_avg_load > SCALE_UP_THRESHOLD:
+                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1))-1 > SCALE_DOWN_THRESHOLD:
                     deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
