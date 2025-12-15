@@ -1,0 +1,34 @@
+# /etc/haproxy/haproxy.cfg.template
+# Global settings
+global
+    maxconn 2000
+    user haproxy
+    group haproxy
+    daemon
+    log /dev/log local0 info
+    nbthread 1
+
+# Default settings that apply to all following sections
+defaults
+    mode http
+    log global
+    option httplog
+    option dontlognull
+    maxconn 1000
+    option forwardfor
+    retries 3
+    timeout connect 5000ms
+    timeout client 50000ms
+    timeout server 50000ms
+
+# Frontend section
+frontend http_in
+    mode http
+    bind *:8888
+    default_backend web_servers
+
+# Backend section - The pool of servers where traffic is load balanced
+backend web_servers
+    balance leastconn
+    option httpchk GET /
+{UPSTREAM_SERVERS} # <-- AUTOSCALER WILL REPLACE THIS LINE
