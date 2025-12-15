@@ -364,29 +364,29 @@ async def autoscaler_task():
 
             # --- 3. ISOLATION CHECK: Find and isolate bottlenecked servers ---
             
-            waiting_requests = [r['waiting'] for r in metric_results if r['waiting'] >= 0]
+            # waiting_requests = [r['waiting'] for r in metric_results if r['waiting'] >= 0]
             
-            if len(waiting_requests) >= 2: 
-                median_waiting = np.median(waiting_requests)
-                isolation_threshold = median_waiting * ISOLATION_THRESHOLD_FACTOR
+            # if len(waiting_requests) >= 2: 
+            #     median_waiting = np.median(waiting_requests)
+            #     isolation_threshold = median_waiting * ISOLATION_THRESHOLD_FACTOR
                 
-                if isolation_threshold > 0:
-                    for server in active_servers_for_metrics:
-                        metrics = server_metrics_map.get((server['host'], server['port']))
+            #     if isolation_threshold > 0:
+            #         for server in active_servers_for_metrics:
+            #             metrics = server_metrics_map.get((server['host'], server['port']))
                         
-                        if metrics and metrics['waiting'] > isolation_threshold:
-                            print(f"\n⚠️ Isolating server {server['host']}:{server['port']}! Waiting queue ({metrics['waiting']:.0f}) > {ISOLATION_THRESHOLD_FACTOR}x median ({median_waiting:.2f}).")
+            #             if metrics and metrics['waiting'] > isolation_threshold:
+            #                 print(f"\n⚠️ Isolating server {server['host']}:{server['port']}! Waiting queue ({metrics['waiting']:.0f}) > {ISOLATION_THRESHOLD_FACTOR}x median ({median_waiting:.2f}).")
                             
-                            server['status'] = 'bottlenecked'
-                            server['isolation_end_time'] = time.time() + ISOLATION_DURATION_SECONDS
-                            haproxy_reload_needed = True 
+            #                 server['status'] = 'bottlenecked'
+            #                 server['isolation_end_time'] = time.time() + ISOLATION_DURATION_SECONDS
+            #                 haproxy_reload_needed = True 
                             
-            # --- 4. HAPROXY RELOAD ---
-            if haproxy_reload_needed:
-                final_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
-                if await update_haproxy_config(final_active_servers):
-                    reload_haproxy()
-                continue 
+            # # --- 4. HAPROXY RELOAD ---
+            # if haproxy_reload_needed:
+            #     final_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+            #     if await update_haproxy_config(final_active_servers):
+            #         reload_haproxy()
+            #     continue 
 
             # --- 5. SCALING DECISION ---
             
