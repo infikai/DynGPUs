@@ -15,8 +15,8 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/custom_hvd/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 5
-SCALE_UP_THRESHOLD = 10
+SCALE_DOWN_THRESHOLD = 15
+SCALE_UP_THRESHOLD = 25
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
@@ -426,7 +426,7 @@ async def autoscaler_task():
             # 1. Median Delta Trigger (Anticipatory Scaling - overrides cooldown)
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
-                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+3 < SCALE_UP_THRESHOLD:
+                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1) < SCALE_UP_THRESHOLD:
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
@@ -434,7 +434,7 @@ async def autoscaler_task():
                     if await scale_down(count=num_to_scale): 
                         last_scaling_time = time.time()
                         
-                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1))-1 > SCALE_DOWN_THRESHOLD:
+                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1)) > SCALE_DOWN_THRESHOLD:
                     deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
