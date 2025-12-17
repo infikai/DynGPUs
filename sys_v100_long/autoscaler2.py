@@ -28,7 +28,7 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 8
+LOAD_HISTORY_SIZE = 12
 DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
 # -------------------------------------
