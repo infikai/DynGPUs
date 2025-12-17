@@ -15,8 +15,8 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 10
-SCALE_UP_THRESHOLD = 20
+SCALE_DOWN_THRESHOLD = 12
+SCALE_UP_THRESHOLD = 22
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
