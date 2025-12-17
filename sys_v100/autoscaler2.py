@@ -15,8 +15,8 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 12
-SCALE_UP_THRESHOLD = 22
+SCALE_DOWN_THRESHOLD = 11
+SCALE_UP_THRESHOLD = 21
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
@@ -28,7 +28,7 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 8
+LOAD_HISTORY_SIZE = 12
 DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
 # -------------------------------------
