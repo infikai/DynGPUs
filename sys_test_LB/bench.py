@@ -289,7 +289,7 @@ def calculate_metrics(
     completed_requests = sum(1 for r in results if r.success)
     total_output_tokens = sum(r.output_len for r in results if r.success)
 
-    log("\n" + "="*50)
+    log("="*50)
     log("=============== Benchmark Summary ================")
     log("="*50)
     log(f"Total benchmark time: {duration:.2f} s")
@@ -350,6 +350,7 @@ def calculate_metrics(
     log("\n" + "-"*15 + "Inter-token Latency (Overall)" + "-"*15)
     print_latency_stats("ITL", itls)
     log("="*50)
+    log("\n")
 
     # Save summary to file
     try:
