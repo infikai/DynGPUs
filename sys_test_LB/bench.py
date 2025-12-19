@@ -378,7 +378,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-file",
         type=str,
-        default="./staged_benchmark_results.jsonl",
+        default="./results.jsonl",
         help="Path to a JSONL file to save detailed results for each request."
     )
     parser.add_argument(
