@@ -23,6 +23,15 @@ BENCHMARK_STAGES = {
     "Stage 7": 0.5,
     "Stage 8": 0.8,
     "Stage 9": 0.4,
+    "Stage 10": 0.6,
+    "Stage 11": 0.9,
+    "Stage 12": 0.3,
+    "Stage 13": 0.7,
+    "Stage 14": 0.2,
+    "Stage 15": 0.5,
+    "Stage 16": 0.8,
+    "Stage 17": 0.9,
+    "Stage 18": 0.3,
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
