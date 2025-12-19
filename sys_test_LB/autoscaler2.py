@@ -37,7 +37,7 @@ MEDIAN_DELTA_TRIGGER = 0.25
 # --- 🖥️ Server State Management (Retained) ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
-    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
+    # {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
     {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
@@ -426,7 +426,7 @@ async def autoscaler_task():
             # 1. Median Delta Trigger (Anticipatory Scaling - overrides cooldown)
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
-                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1) < SCALE_UP_THRESHOLD:
+                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < SCALE_UP_THRESHOLD:
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
