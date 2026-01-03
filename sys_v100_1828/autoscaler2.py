@@ -12,7 +12,7 @@ from typing import List, Dict
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg"  # The file to be overwritten
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template" # The template file
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
-ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100_1525/active_workers.txt"
+ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100_1828/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
 SCALE_DOWN_THRESHOLD = 18

@@ -15,7 +15,7 @@ import logging # MODIFICATION: Import logging
 import gc
 
 # Hyperparameters
-EPOCHS = 90
+EPOCHS = 40
 
 class TrainingState:
     def __init__(self):
@@ -264,7 +264,7 @@ def main():
             state.processed_num = 0
             config_changed = True
 
-def read_active_ranks_from_file(filepath='/home/pacs/Kevin/DynGPUs/sys_v100_1525/active_workers.txt'):
+def read_active_ranks_from_file(filepath='/home/pacs/Kevin/DynGPUs/sys_v100_1828/active_workers.txt'):
     try:
         if not os.path.exists(filepath):
             time.sleep(1)
