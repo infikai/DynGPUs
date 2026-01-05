@@ -1,0 +1,1 @@
+rm staged_benchmark_results.jsonl active_servers.log throughput.log summary.txt
