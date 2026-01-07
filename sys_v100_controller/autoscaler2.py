@@ -13,14 +13,16 @@ from collections import deque
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg"  # The file to be overwritten
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template" # The template file
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
+TTFT_LOG_FILE = "./ttft_controller.log"
 ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
 SCALE_DOWN_THRESHOLD = 11
 SCALE_UP_THRESHOLD = 21
+LOAD_HISTORY_SIZE = 12
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 4
+MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
@@ -28,11 +30,20 @@ GPU_MEMORY_FREE_THRESHOLD_MB = 3000
 GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
-# --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 12
-DELTA_HISTORY_SIZE = 5
-MEDIAN_DELTA_TRIGGER = 0.25
-# -------------------------------------
+# --- P-Controller Configuration (TTFT) ---
+# Target Time To First Token in seconds
+# 0.2s (200ms) is a common SLO for interactive applications.
+TTFT_TARGET_SECONDS = 1.5
+
+# Proportional Gain (Kp). 
+# Example: If TTFT is 0.1s over target, Threshold drops by (0.1 * 20) = 2.
+TTFT_KP = 10.0 
+
+# Limits for Dynamic Thresholds
+MIN_DYNAMIC_UP_THRESHOLD = 10
+MAX_DYNAMIC_UP_THRESHOLD = 40
+MIN_DYNAMIC_DOWN_THRESHOLD = 5
+MAX_DYNAMIC_DOWN_THRESHOLD = 30
 
 
 # --- 🖥️ Server State Management (Retained) ---
@@ -414,7 +425,22 @@ async def autoscaler_task():
             current_up_threshold = max(MIN_DYNAMIC_UP_THRESHOLD, min(MAX_DYNAMIC_UP_THRESHOLD, new_up))
             current_down_threshold = max(MIN_DYNAMIC_DOWN_THRESHOLD, min(MAX_DYNAMIC_DOWN_THRESHOLD, new_down))
             
-            
+            try:
+                log_line = (
+                    f"{time.strftime('%Y-%m-%d %H:%M:%S')}, "
+                    f"{smoothed_ttft*1000:.2f}, "
+                    f"{TTFT_TARGET_SECONDS*1000:.0f}, "
+                    f"{ttft_error*1000:.2f}, "
+                    f"{adjustment:.4f}, "
+                    f"{current_up_threshold:.2f}, "
+                    f"{current_down_threshold:.2f}, "
+                    f"{len(active_servers_for_metrics)}\n"
+                )
+                with open(TTFT_LOG_FILE, "a") as f:
+                    f.write(log_line)
+            except Exception as e:
+                print(f"Logging Error: {e}")
+
             # --- SCALING DECISION ---
             
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
