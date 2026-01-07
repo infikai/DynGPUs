@@ -117,10 +117,11 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
     return False
 
 async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
-    # ... (content remains the same) ...
-    """Fetches and parses metrics from a vLLM server's /metrics endpoint."""
+    """Fetches metrics including TTFT counters."""
     url = f"http://{server['host']}:{server['port']}/metrics"
     running, waiting = 0.0, 0.0
+    ttft_sum, ttft_count = 0.0, 0.0
+    
     try:
         response = await client.get(url, timeout=5)
         response.raise_for_status()
@@ -129,8 +130,21 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
                 running = float(line.rsplit(' ', 1)[1])
             elif line.startswith("vllm:num_requests_waiting"):
                 waiting = float(line.rsplit(' ', 1)[1])
-    except httpx.RequestError: pass
-    return {"running": running, "waiting": waiting}
+            # --- TTFT Parsing ---
+            elif line.startswith("vllm:time_to_first_token_seconds_sum"):
+                ttft_sum = float(line.rsplit(' ', 1)[1])
+            elif line.startswith("vllm:time_to_first_token_seconds_count"):
+                ttft_count = float(line.rsplit(' ', 1)[1])
+                
+    except httpx.RequestError: 
+        pass
+    
+    return {
+        "running": running, 
+        "waiting": waiting, 
+        "ttft_sum": ttft_sum, 
+        "ttft_count": ttft_count
+    }
 
 
 # --- MODIFIED: HAProxy Configuration Update ---
