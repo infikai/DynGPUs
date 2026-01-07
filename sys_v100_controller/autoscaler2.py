@@ -354,7 +354,7 @@ async def log_active_servers():
         await asyncio.sleep(5)
 
 async def autoscaler_task():
-    print("🚀 Autoscaler started with Stabilized P-Controller (TTFT)...")
+    print("🚀 Autoscaler started with Stabilized P-Controller (TTFT) + Detailed Logging...")
     last_scaling_time = 0
     load_history = []
     last_total_load = 0
@@ -363,13 +363,19 @@ async def autoscaler_task():
     last_ttft_sum = 0.0
     last_ttft_count = 0.0
     
-    # --- STABILIZATION STATE ---
-    # We use a deque to keep a rolling window of recent TTFT averages
+    # Stabilization State
     ttft_history = deque(maxlen=TTFT_HISTORY_SIZE)
     
     # Initialize Dynamic Thresholds
     current_up_threshold = SCALE_UP_THRESHOLD
     current_down_threshold = SCALE_DOWN_THRESHOLD
+
+    # Ensure Log Header Exists
+    try:
+        with open(TTFT_LOG_FILE, "x") as f:
+            f.write("Timestamp, Instant_TTFT_ms, Smoothed_TTFT_ms, Target_ms, Error_ms, Adjustment, Up_Threshold, Down_Threshold, Active_Servers, Instant_Load, Smoothed_Load\n")
+    except FileExistsError:
+        pass
 
     async with httpx.AsyncClient() as client:
         while True:
@@ -394,17 +400,11 @@ async def autoscaler_task():
             delta_ttft_sum = curr_ttft_sum - last_ttft_sum
             delta_ttft_count = curr_ttft_count - last_ttft_count
             
-            # 1. Calculate Instantaneous TTFT
+            instant_ttft = 0.0  # Default if no traffic
             if delta_ttft_count > 0:
                 instant_ttft = delta_ttft_sum / delta_ttft_count
-                ttft_history.append(instant_ttft) # Add to history
-            else:
-                # If no requests, do we append 0? 
-                # Better to append the LAST known value or nothing to avoid dragging average down artificially.
-                # Here we skip appending to keep the average "honest" to active traffic.
-                pass 
+                ttft_history.append(instant_ttft)
             
-            # Update cumulative counters
             if curr_ttft_count >= last_ttft_count:
                 last_ttft_sum = curr_ttft_sum
                 last_ttft_count = curr_ttft_count
@@ -412,72 +412,71 @@ async def autoscaler_task():
                 last_ttft_sum, last_ttft_count = 0.0, 0.0
 
             # --- STABILIZED P-CONTROLLER LOGIC ---
-            
-            # 2. Calculate Smoothed TTFT (Mean of history)
             if len(ttft_history) > 0:
                 smoothed_ttft = np.mean(ttft_history)
             else:
                 smoothed_ttft = 0.0
 
             adjustment = 0.0
+            ttft_error = 0.0
             
             if smoothed_ttft > 0:
-                # 3. Check Deadband
-                # Only act if we are OUTSIDE the safe zone (Target +/- Deadband)
-                if abs(smoothed_ttft - TTFT_TARGET_SECONDS) > TTFT_DEADBAND:
-                    
-                    ttft_error = smoothed_ttft - TTFT_TARGET_SECONDS
+                ttft_error = smoothed_ttft - TTFT_TARGET_SECONDS
+                if abs(ttft_error) > TTFT_DEADBAND:
                     raw_adjustment = TTFT_KP * ttft_error
-                    
-                    # 4. Clamp the Rate of Change (Slew Rate Limiting)
-                    # This ensures we don't change the threshold by more than X in a single step
-                    # adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
+                    adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
 
-            # Apply Adjustment (Subtracting because High TTFT -> Lower Threshold)
-            # We apply it to the CURRENT threshold, not the BASE threshold, to make it integral-like behavior?
-            # Actually, P-Controllers usually apply to a base. 
-            # To make it "Dynamic" but stable, we calculate off the BASE config every time.
-            
+            # Apply Adjustment
             new_up = SCALE_UP_THRESHOLD - adjustment
             new_down = SCALE_DOWN_THRESHOLD - adjustment
             
-            # Clamp final values
             current_up_threshold = max(MIN_DYNAMIC_UP_THRESHOLD, min(MAX_DYNAMIC_UP_THRESHOLD, new_up))
             current_down_threshold = max(MIN_DYNAMIC_DOWN_THRESHOLD, min(MAX_DYNAMIC_DOWN_THRESHOLD, new_down))
             
-            try:
-                log_line = (
-                    f"{time.strftime('%Y-%m-%d %H:%M:%S')}, "
-                    f"{smoothed_ttft*1000:.2f}, "
-                    f"{TTFT_TARGET_SECONDS*1000:.0f}, "
-                    f"{ttft_error*1000:.2f}, "
-                    f"{adjustment:.4f}, "
-                    f"{current_up_threshold:.2f}, "
-                    f"{current_down_threshold:.2f}, "
-                    f"{len(active_servers_for_metrics)}\n"
-                )
-                with open(TTFT_LOG_FILE, "a") as f:
-                    f.write(log_line)
-            except Exception as e:
-                print(f"Logging Error: {e}")
-
-            # --- SCALING DECISION ---
-            
+            # --- CALCULATE LOAD ---
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
             instantaneous_avg_load = total_load / len(active_servers_for_metrics)
 
             load_history.append(instantaneous_avg_load)
             if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
             smoothed_avg_load = np.mean(load_history)
-            
+
+            # --- LOGGING TO FILE ---
+            try:
+                log_line = (
+                    f"{time.strftime('%Y-%m-%d %H:%M:%S')}, "
+                    f"{instant_ttft*1000:.2f}, "      # New: Instant TTFT
+                    f"{smoothed_ttft*1000:.2f}, "
+                    f"{TTFT_TARGET_SECONDS*1000:.0f}, "
+                    f"{ttft_error*1000:.2f}, "
+                    f"{adjustment:.4f}, "
+                    f"{current_up_threshold:.2f}, "
+                    f"{current_down_threshold:.2f}, "
+                    f"{len(active_servers_for_metrics)}, "
+                    f"{instantaneous_avg_load:.2f}, " # New: Instant Load
+                    f"{smoothed_avg_load:.2f}\n"
+                )
+                with open(TTFT_LOG_FILE, "a") as f:
+                    f.write(log_line)
+            except Exception as e:
+                print(f"Logging Error: {e}")
+
+            # --- CONSOLE MONITORING OUTPUT ---
+            # 1. Build Per-Server Details
+            server_details = []
+            for server, metrics in zip(active_servers_for_metrics, metric_results):
+                r = metrics.get('running', 0)
+                w = metrics.get('waiting', 0)
+                server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
+
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
-            print(f"TTFT: Smooth: {smoothed_ttft*1000:.0f}ms | Target: {TTFT_TARGET_SECONDS*1000:.0f}ms | Error: {(smoothed_ttft - TTFT_TARGET_SECONDS)*1000:.0f}ms")
-            print(f"CTRL: Adj: {adjustment:.2f} | Thresholds: UP {current_up_threshold:.1f} / DOWN {current_down_threshold:.1f}")
-            print(f"LOAD: Active: {len(active_servers_for_metrics)} | Load: {smoothed_avg_load:.2f}")
+            print(f"TTFT : Inst: {instant_ttft*1000:.0f}ms | Smooth: {smoothed_ttft*1000:.0f}ms | Err: {ttft_error*1000:.0f}ms")
+            print(f"CTRL : Adj: {adjustment:.2f} -> Thresholds: UP {current_up_threshold:.1f} / DOWN {current_down_threshold:.1f}")
+            print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Active Servers: {len(active_servers_for_metrics)}")
+            print(f"DTLS : {' | '.join(server_details)}")
 
             # DECISION LOGIC (Using Dynamic Thresholds)
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
-                
                 if (smoothed_avg_load < current_down_threshold and 
                     instantaneous_avg_load < current_down_threshold and 
                     (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < current_up_threshold):
