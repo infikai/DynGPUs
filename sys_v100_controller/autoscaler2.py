@@ -31,15 +31,21 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- P-Controller Configuration (TTFT) ---
-# Target Time To First Token in seconds
-# 0.2s (200ms) is a common SLO for interactive applications.
 TTFT_TARGET_SECONDS = 1.5
-
-# Proportional Gain (Kp). 
-# Example: If TTFT is 0.1s over target, Threshold drops by (0.1 * 20) = 2.
 TTFT_KP = 10.0 
 
-# Limits for Dynamic Thresholds
+# STABILIZATION SETTINGS
+# Number of monitor intervals to average TTFT over (e.g., 5 * 3s = 15s window)
+TTFT_HISTORY_SIZE = 5 
+
+# Deadband: If TTFT is within ±10% of target, do not change thresholds.
+# This prevents constant micro-adjustments.
+TTFT_DEADBAND = 0.1 * TTFT_TARGET_SECONDS  
+
+# Max change per step: Prevent thresholds from jumping too fast (e.g. max +/- 2 per cycle)
+MAX_THRESHOLD_CHANGE_PER_STEP = 2.0
+
+# Limits
 MIN_DYNAMIC_UP_THRESHOLD = 10
 MAX_DYNAMIC_UP_THRESHOLD = 40
 MIN_DYNAMIC_DOWN_THRESHOLD = 5
