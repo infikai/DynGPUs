@@ -17,8 +17,8 @@ TTFT_LOG_FILE = "./ttft_controller.log"
 ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 11
-SCALE_UP_THRESHOLD = 21
+SCALE_DOWN_THRESHOLD = 10
+SCALE_UP_THRESHOLD = 20
 LOAD_HISTORY_SIZE = 12
 
 # Scaling Rules
@@ -431,7 +431,7 @@ async def autoscaler_task():
                     
                     # 4. Clamp the Rate of Change (Slew Rate Limiting)
                     # This ensures we don't change the threshold by more than X in a single step
-                    adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
+                    # adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
 
             # Apply Adjustment (Subtracting because High TTFT -> Lower Threshold)
             # We apply it to the CURRENT threshold, not the BASE threshold, to make it integral-like behavior?

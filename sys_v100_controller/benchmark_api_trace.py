@@ -16,9 +16,22 @@ STAGE_DURATION_SECONDS = 200  # 5 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1": 0.5,
     "Stage 2": 0.8,
-    "Stage 3": 0.3,
-    "Stage 4": 0.8,
+    "Stage 3": 1,
+    "Stage 4": 0.6,
     "Stage 5": 0.4,
+    "Stage 6": 0.9,
+    "Stage 7": 0.5,
+    "Stage 8": 0.8,
+    "Stage 9": 0.4,
+    "Stage 10": 0.6,
+    "Stage 11": 0.9,
+    "Stage 12": 0.8,
+    "Stage 13": 0.4,
+    "Stage 14": 0.2,
+    "Stage 15": 0.5,
+    "Stage 16": 0.4,
+    "Stage 17": 0.9,
+    "Stage 18": 0.3,
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
@@ -193,6 +206,7 @@ def prepare_requests(all_requests: List[Request], stages: Dict[str, int], stage_
         extended_requests = all_requests
         
     # 3. Sample exactly the number of requests needed
+    random.seed(42)
     sampled_requests = random.sample(extended_requests, total_requests_needed)
     
     # 4. Partition and assign stage metadata
