@@ -102,7 +102,7 @@ async def run_experiment(args):
     concurrency_sweep = [0, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
     
     # --- NEW: Probe Lengths Configuration ---
-    probe_lengths = [500, 1000, 2000, 4000] 
+    probe_lengths = [50, 500, 1000, 2000, 4000] 
     
     data_points = [] 
 
