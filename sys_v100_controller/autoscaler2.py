@@ -34,7 +34,7 @@ DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
 
 # --- P-Controller Configuration (Physically Tuned) ---
-TTFT_TARGET_SECONDS = 4
+TTFT_TARGET_SECONDS = 3
 QUEUE_COST_MS_PER_REQUEST = 521.62 
 
 # Physics-based Gain
@@ -47,7 +47,7 @@ TTFT_KP = THEORETICAL_KP * GAIN_FACTOR
 TTFT_HISTORY_SIZE = 5
 
 TTFT_DEADBAND = 0.1 * TTFT_TARGET_SECONDS  
-MAX_THRESHOLD_CHANGE_PER_STEP = 2.0 
+MAX_THRESHOLD_CHANGE_PER_STEP = 4.0 
 
 # Proximity Trigger:
 # Only adjust thresholds if Load > (Base Up Threshold * 0.5)
