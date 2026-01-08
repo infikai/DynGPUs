@@ -20,7 +20,7 @@ SCALE_DOWN_THRESHOLD = 11
 SCALE_UP_THRESHOLD = 21
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 2
+MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
@@ -35,27 +35,24 @@ MEDIAN_DELTA_TRIGGER = 0.25
 
 # --- P-Controller Configuration (Physically Tuned) ---
 TTFT_TARGET_SECONDS = 4
-
-# NEW: The cost of a waiting request (from your data)
 QUEUE_COST_MS_PER_REQUEST = 521.62 
 
-# Calculate Theoretical Kp: 
-# If we have 1.0s error, how many requests do we need to remove to fix it?
-# Kp = 1 second / (Cost per request in seconds)
-# Kp = 1.0 / 0.52162 ~= 1.917
+# Physics-based Gain
 THEORETICAL_KP = 1.0 / (QUEUE_COST_MS_PER_REQUEST / 1000.0)
-
-# Tuning Factor: Multiplier to control aggression.
-# 1.0 = Deadbeat (Correct exactly the estimated error). 
-# 1.2 = Slightly aggressive (Correct slightly more to ensure convergence).
 GAIN_FACTOR = 1.2
-
 TTFT_KP = THEORETICAL_KP * GAIN_FACTOR
 
-# Stabilization
-TTFT_HISTORY_SIZE = 5 
+# --- UPDATED: Stabilization Settings ---
+# Reverted to short window: 5 samples * 3s interval = 15 Seconds Moving Average
+TTFT_HISTORY_SIZE = 5
+
 TTFT_DEADBAND = 0.1 * TTFT_TARGET_SECONDS  
 MAX_THRESHOLD_CHANGE_PER_STEP = 2.0 
+
+# Proximity Trigger:
+# Only adjust thresholds if Load > (Base Up Threshold * 0.5)
+# i.e., If threshold is 21, we only enable P-Control when Load > 10.5
+LOAD_PROXIMITY_RATIO = 0.5
 
 # Limits
 MIN_DYNAMIC_UP_THRESHOLD = 10
@@ -73,7 +70,7 @@ ALL_SERVERS = [
 ]
 
 
-# --- Helper Functions ---
+# --- Helper Functions (Retained) ---
 
 def read_active_workers() -> List[int]:
     try:
@@ -254,9 +251,10 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started with Physics-Based P-Controller...")
-    print(f"ℹ️  Queue Cost: {QUEUE_COST_MS_PER_REQUEST}ms/req -> Calculated Kp: {TTFT_KP:.3f}")
-    
+    print(f"🚀 Autoscaler started with Proximity-Based P-Controller...")
+    print(f"ℹ️  Queue Cost: {QUEUE_COST_MS_PER_REQUEST}ms/req -> Kp: {TTFT_KP:.3f}")
+    print(f"ℹ️  Window: {TTFT_HISTORY_SIZE*MONITOR_INTERVAL_SECONDS}s | Proximity Trigger: >{LOAD_PROXIMITY_RATIO*100}% Load")
+
     last_scaling_time = 0
     load_history = []
     last_total_load = 0
@@ -286,6 +284,14 @@ async def autoscaler_task():
             metric_tasks = [get_server_metrics(server, client) for server in active_servers_for_metrics]
             metric_results = await asyncio.gather(*metric_tasks)
 
+            # --- CALCULATE LOAD FIRST (Needed for Proximity Check) ---
+            total_load = sum(r['running'] + r['waiting'] for r in metric_results)
+            instantaneous_avg_load = total_load / len(active_servers_for_metrics)
+
+            load_history.append(instantaneous_avg_load)
+            if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
+            smoothed_avg_load = np.mean(load_history)
+
             # --- TTFT DATA COLLECTION ---
             curr_ttft_sum = sum(r['ttft_sum'] for r in metric_results)
             curr_ttft_count = sum(r['ttft_count'] for r in metric_results)
@@ -298,7 +304,7 @@ async def autoscaler_task():
                 instant_ttft = delta_ttft_sum / delta_ttft_count
                 ttft_history.append(instant_ttft)
             
-            # Handle Restarts/Resets
+            # Handle Restarts
             if curr_ttft_count >= last_ttft_count:
                 last_ttft_sum = curr_ttft_sum
                 last_ttft_count = curr_ttft_count
@@ -314,12 +320,18 @@ async def autoscaler_task():
             adjustment = 0.0
             ttft_error = 0.0
             
-            if smoothed_ttft > 0:
+            # --- PROXIMITY CHECK ---
+            # Only enable controller adjustments if system load is significant.
+            is_near_threshold = smoothed_avg_load > (SCALE_UP_THRESHOLD * LOAD_PROXIMITY_RATIO)
+
+            if is_near_threshold and smoothed_ttft > 0:
                 ttft_error = smoothed_ttft - TTFT_TARGET_SECONDS
                 if abs(ttft_error) > TTFT_DEADBAND:
-                    # Kp is now derived from Queue Cost
                     raw_adjustment = TTFT_KP * ttft_error
                     adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
+            else:
+                # Reset to default if load is low or TTFT invalid
+                adjustment = 0.0
 
             # Apply Adjustment
             new_up = SCALE_UP_THRESHOLD - adjustment
@@ -328,14 +340,6 @@ async def autoscaler_task():
             current_up_threshold = max(MIN_DYNAMIC_UP_THRESHOLD, min(MAX_DYNAMIC_UP_THRESHOLD, new_up))
             current_down_threshold = max(MIN_DYNAMIC_DOWN_THRESHOLD, min(MAX_DYNAMIC_DOWN_THRESHOLD, new_down))
             
-            # --- CALCULATE LOAD ---
-            total_load = sum(r['running'] + r['waiting'] for r in metric_results)
-            instantaneous_avg_load = total_load / len(active_servers_for_metrics)
-
-            load_history.append(instantaneous_avg_load)
-            if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
-            smoothed_avg_load = np.mean(load_history)
-
             # --- LOGGING ---
             try:
                 log_line = (
@@ -354,10 +358,11 @@ async def autoscaler_task():
                 r = metrics.get('running', 0)
                 w = metrics.get('waiting', 0)
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
-
+            
+            ctrl_status = "ACTIVE" if is_near_threshold else "IDLE"
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
-            print(f"TTFT : Inst: {instant_ttft*1000:.0f}ms | Smooth: {smoothed_ttft*1000:.0f}ms | Err: {ttft_error*1000:.0f}ms")
-            print(f"CTRL : Adj: {adjustment:.2f} (Kp={TTFT_KP:.2f}) -> UP {current_up_threshold:.1f} / DOWN {current_down_threshold:.1f}")
+            print(f"TTFT : Smooth: {smoothed_ttft*1000:.0f}ms | Err: {ttft_error*1000:.0f}ms")
+            print(f"CTRL : [{ctrl_status}] Adj: {adjustment:.2f} -> UP {current_up_threshold:.1f} / DOWN {current_down_threshold:.1f}")
             print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Servers: {len(active_servers_for_metrics)}")
             print(f"DTLS : {' | '.join(server_details)}")
 
