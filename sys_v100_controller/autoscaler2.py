@@ -44,7 +44,7 @@ TTFT_KP = THEORETICAL_KP * GAIN_FACTOR
 
 # --- UPDATED: Stabilization Settings ---
 # Reverted to short window: 5 samples * 3s interval = 15 Seconds Moving Average
-TTFT_HISTORY_SIZE = 5
+TTFT_HISTORY_SIZE = 2
 
 TTFT_DEADBAND = 0.1 * TTFT_TARGET_SECONDS  
 MAX_THRESHOLD_CHANGE_PER_STEP = 4.0 
