@@ -53,7 +53,7 @@ QUEUE_SATURATION_RATIO = 0.5
 
 # 2. Proximity: Trigger if System Load > 80% of the Base Up Threshold.
 # If Threshold is 21, controller wakes up at load ~16.8 to prevent latency spikes.
-LOAD_PROXIMITY_RATIO = 0.8
+LOAD_PROXIMITY_RATIO = 0.9
 
 # Limits
 MIN_DYNAMIC_UP_THRESHOLD = 10
