@@ -183,8 +183,8 @@ async def run_experiment(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", type=str, default="http://localhost:8000/v1/completions")
-    parser.add_argument("--metrics-url", type=str, default="http://localhost:8000/metrics")
+    parser.add_argument("--url", type=str, default="http://localhost:8002/v1/completions")
+    parser.add_argument("--metrics-url", type=str, default="http://localhost:8002/metrics")
     parser.add_argument("--model-path", type=str, required=True)
     parser.add_argument("--probes", type=int, default=20)
     parser.add_argument("--warmup", type=int, default=10)
