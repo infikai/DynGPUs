@@ -20,7 +20,7 @@ SCALE_DOWN_THRESHOLD = 11
 SCALE_UP_THRESHOLD = 21
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 2
+MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
@@ -64,7 +64,7 @@ MAX_DYNAMIC_DOWN_THRESHOLD = 30
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
     # {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
-    {"host": "localhost", "port": 8001, "status": "active", "rank": 1, "shared": True},
+    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
 
