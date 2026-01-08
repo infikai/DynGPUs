@@ -234,7 +234,7 @@ async def main():
         targets = [5, 10, 20, 40, 60] 
         
         for target in targets:
-            res = await run_test_block(controller, api_url, args.model, target, 100, "concurrency")
+            res = await run_test_block(controller, api_url, args.model, target, 500, "concurrency")
             if res: all_results.append(res)
             
             print(f"     Cooling down for {INTER_TEST_DELAY}s...")
