@@ -8,19 +8,18 @@ from typing import List, Dict
 from collections import deque
 
 # --- ⚙️ Configuration ---
-# File Paths
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg" 
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
 ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
-# Scaling Thresholds (Base)
+# Base Scaling Thresholds
 SCALE_DOWN_THRESHOLD = 11
 SCALE_UP_THRESHOLD = 21
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 1
+MIN_ACTIVE_SERVERS = 1  # Updated
 SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
@@ -30,29 +29,22 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
 LOAD_HISTORY_SIZE = 12
-DELTA_HISTORY_SIZE = 5
-MEDIAN_DELTA_TRIGGER = 0.25
 
-# --- P-Controller Configuration (Physically Tuned) ---
-TTFT_TARGET_SECONDS = 2.5
+# --- P-Controller & Feedforward Configuration ---
+BASE_TTFT_TARGET_SECONDS = 80
+PREFILL_MS_PER_TOKEN = 0.5  
+
 QUEUE_COST_MS_PER_REQUEST = 521.62 
-
-# Physics-based Gain
 THEORETICAL_KP = 1.0 / (QUEUE_COST_MS_PER_REQUEST / 1000.0)
 GAIN_FACTOR = 1.2
 TTFT_KP = THEORETICAL_KP * GAIN_FACTOR
 
-# --- Stabilization Settings ---
+# Stabilization
 TTFT_HISTORY_SIZE = 5
-TTFT_DEADBAND = 0.1 * TTFT_TARGET_SECONDS  
-MAX_THRESHOLD_CHANGE_PER_STEP = 2.0 
+MAX_THRESHOLD_CHANGE_PER_STEP = 4.0 
 
-# --- ACTIVATION TRIGGERS ---
-# 1. Saturation: Trigger if >50% of servers have waiting requests.
+# Triggers
 QUEUE_SATURATION_RATIO = 0.5
-
-# 2. Proximity: Trigger if System Load > 80% of the Base Up Threshold.
-# If Threshold is 21, controller wakes up at load ~16.8 to prevent latency spikes.
 LOAD_PROXIMITY_RATIO = 0.9
 
 # Limits
@@ -66,26 +58,28 @@ MAX_DYNAMIC_DOWN_THRESHOLD = 30
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
     # {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
+    
+    # CHANGED: This one (8001) is now sleeping
     {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    
+    # This one (8002) is active
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
 
 
-# --- Helper Functions (Retained) ---
+# --- Helper Functions ---
 
 def read_active_workers() -> List[int]:
     try:
         with open(ACTIVE_WORKERS_FILE, "r") as f:
             content = f.read().strip()
             return [int(rank) for rank in content.split(',')] if content else []
-    except FileNotFoundError:
-        return []
+    except FileNotFoundError: return []
 
 def write_active_workers(ranks: List[int]):
     ranks.sort()
     content = ",".join(map(str, ranks))
-    with open(ACTIVE_WORKERS_FILE, "w") as f:
-        f.write(content)
+    with open(ACTIVE_WORKERS_FILE, "w") as f: f.write(content)
     print(f"\nUpdated active_workers.txt with ranks: {content}")
 
 async def check_gpu_memory_is_free(server: Dict) -> bool:
@@ -112,22 +106,27 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
 
 async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
     url = f"http://{server['host']}:{server['port']}/metrics"
-    running, waiting = 0.0, 0.0
-    ttft_sum, ttft_count = 0.0, 0.0
+    metrics = {
+        "running": 0.0, "waiting": 0.0, 
+        "ttft_sum": 0.0, "ttft_count": 0.0,
+        "prompt_tokens": 0.0 
+    }
     try:
         response = await client.get(url, timeout=5)
         response.raise_for_status()
         for line in response.text.split('\n'):
             if line.startswith("vllm:num_requests_running"):
-                running = float(line.rsplit(' ', 1)[1])
+                metrics["running"] = float(line.rsplit(' ', 1)[1])
             elif line.startswith("vllm:num_requests_waiting"):
-                waiting = float(line.rsplit(' ', 1)[1])
+                metrics["waiting"] = float(line.rsplit(' ', 1)[1])
             elif line.startswith("vllm:time_to_first_token_seconds_sum"):
-                ttft_sum = float(line.rsplit(' ', 1)[1])
+                metrics["ttft_sum"] = float(line.rsplit(' ', 1)[1])
             elif line.startswith("vllm:time_to_first_token_seconds_count"):
-                ttft_count = float(line.rsplit(' ', 1)[1])
+                metrics["ttft_count"] = float(line.rsplit(' ', 1)[1])
+            elif line.startswith("vllm:prompt_tokens_total"):
+                metrics["prompt_tokens"] = float(line.rsplit(' ', 1)[1])
     except httpx.RequestError: pass
-    return {"running": running, "waiting": waiting, "ttft_sum": ttft_sum, "ttft_count": ttft_count}
+    return metrics
 
 
 # --- HAProxy Logic ---
@@ -145,7 +144,6 @@ async def update_haproxy_config(active_servers: List[Dict]) -> bool:
         return False
 
 def reload_haproxy():
-    print("Reloading HAProxy...")
     try:
         subprocess.run(["sudo", "systemctl", "reload", "haproxy"], check=True)
         print("HAProxy reloaded successfully.")
@@ -252,26 +250,26 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started with Hybrid P-Controller (Saturation + Proximity)...")
-    print(f"ℹ️  Queue Cost: {QUEUE_COST_MS_PER_REQUEST}ms/req -> Kp: {TTFT_KP:.3f}")
+    print(f"🚀 Autoscaler started with Feedforward (Input-Aware) P-Controller...")
+    print(f"ℹ️  Queue Cost: {QUEUE_COST_MS_PER_REQUEST:.2f}ms/req | Prefill Cost: {PREFILL_MS_PER_TOKEN:.2f}ms/token")
     print(f"ℹ️  Triggers: Saturation > {QUEUE_SATURATION_RATIO*100:.0f}%  OR  Load > {LOAD_PROXIMITY_RATIO*100:.0f}% of Threshold")
 
     last_scaling_time = 0
     load_history = []
-    last_total_load = 0
     
-    # State for TTFT Calculation
     last_ttft_sum = 0.0
     last_ttft_count = 0.0
+    last_prompt_tokens = 0.0
+    
     ttft_history = deque(maxlen=TTFT_HISTORY_SIZE)
+    avg_tokens_history = deque(maxlen=TTFT_HISTORY_SIZE)
     
     current_up_threshold = SCALE_UP_THRESHOLD
     current_down_threshold = SCALE_DOWN_THRESHOLD
 
-    # Ensure Log Header
     try:
         with open(TTFT_LOG_FILE, "x") as f:
-            f.write("Timestamp, Instant_TTFT_ms, Smoothed_TTFT_ms, Target_ms, Error_ms, Adjustment, Up_Threshold, Down_Threshold, Active_Servers, Instant_Load, Smoothed_Load, Saturation_Ratio, Proximity_Triggered\n")
+            f.write("Timestamp, Instant_TTFT, Smoothed_TTFT, Avg_Prompt_Tokens, Dynamic_Target, Error, Adjustment, Up_Thresh, Down_Thresh, Active_Servers, Load, Saturation\n")
     except FileExistsError: pass
 
     async with httpx.AsyncClient() as client:
@@ -285,61 +283,63 @@ async def autoscaler_task():
             metric_tasks = [get_server_metrics(server, client) for server in active_servers_for_metrics]
             metric_results = await asyncio.gather(*metric_tasks)
 
-            # --- CALCULATE LOAD & TRIGGERS ---
+            # --- 1. CALCULATE LOAD & SATURATION ---
             waiting_counts = [r['waiting'] for r in metric_results]
             servers_with_waiting = sum(1 for w in waiting_counts if w > 0)
             saturation_ratio = servers_with_waiting / len(active_servers_for_metrics)
             
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
             instantaneous_avg_load = total_load / len(active_servers_for_metrics)
-
             load_history.append(instantaneous_avg_load)
             if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
             smoothed_avg_load = np.mean(load_history)
             
-            # --- TTFT DATA COLLECTION ---
+            # --- 2. CALCULATE TTFT & TOKEN DATA ---
             curr_ttft_sum = sum(r['ttft_sum'] for r in metric_results)
             curr_ttft_count = sum(r['ttft_count'] for r in metric_results)
-            
+            curr_prompt_tokens = sum(r['prompt_tokens'] for r in metric_results)
+
             delta_ttft_sum = curr_ttft_sum - last_ttft_sum
             delta_ttft_count = curr_ttft_count - last_ttft_count
+            delta_prompt_tokens = curr_prompt_tokens - last_prompt_tokens
+
+            if curr_ttft_count < last_ttft_count:
+                delta_ttft_sum, delta_ttft_count, delta_prompt_tokens = 0, 0, 0
             
+            last_ttft_sum = curr_ttft_sum
+            last_ttft_count = curr_ttft_count
+            last_prompt_tokens = curr_prompt_tokens
+
             instant_ttft = 0.0
+            avg_prompt_tokens = 0.0
+            
             if delta_ttft_count > 0:
                 instant_ttft = delta_ttft_sum / delta_ttft_count
+                avg_prompt_tokens = delta_prompt_tokens / delta_ttft_count 
                 ttft_history.append(instant_ttft)
-            
-            if curr_ttft_count >= last_ttft_count:
-                last_ttft_sum = curr_ttft_sum
-                last_ttft_count = curr_ttft_count
-            else:
-                last_ttft_sum, last_ttft_count = 0.0, 0.0
+                avg_tokens_history.append(avg_prompt_tokens)
 
-            # --- STABILIZED P-CONTROLLER LOGIC ---
-            if len(ttft_history) > 0:
-                smoothed_ttft = np.mean(ttft_history)
-            else:
-                smoothed_ttft = 0.0
+            # --- 3. FEEDFORWARD CONTROL LOGIC ---
+            smoothed_ttft = np.mean(ttft_history) if ttft_history else 0.0
+            smoothed_tokens = np.mean(avg_tokens_history) if avg_tokens_history else 0.0
 
             adjustment = 0.0
             ttft_error = 0.0
-            
-            # --- DUAL TRIGGER CHECK ---
-            is_saturated = saturation_ratio >= QUEUE_SATURATION_RATIO
-            # Check against BASE threshold to see if we are "full"
-            is_near_threshold = smoothed_avg_load >= (SCALE_UP_THRESHOLD * LOAD_PROXIMITY_RATIO)
-            
-            should_activate = is_saturated or is_near_threshold
+            dynamic_target = BASE_TTFT_TARGET_SECONDS
 
-            if should_activate and smoothed_ttft > 0:
-                ttft_error = smoothed_ttft - TTFT_TARGET_SECONDS
-                if abs(ttft_error) > TTFT_DEADBAND:
+            is_saturated = saturation_ratio >= QUEUE_SATURATION_RATIO
+            is_near_threshold = smoothed_avg_load >= (SCALE_UP_THRESHOLD * LOAD_PROXIMITY_RATIO)
+            should_activate = (is_saturated or is_near_threshold) and smoothed_ttft > 0
+
+            if should_activate:
+                dynamic_target = BASE_TTFT_TARGET_SECONDS + (smoothed_tokens * PREFILL_MS_PER_TOKEN / 1000.0)
+                ttft_error = smoothed_ttft - dynamic_target
+                deadband = 0.05 * dynamic_target
+                
+                if ttft_error > deadband:
                     raw_adjustment = TTFT_KP * ttft_error
                     adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
-            else:
-                adjustment = 0.0
 
-            # Apply Adjustment
             new_up = SCALE_UP_THRESHOLD - adjustment
             new_down = SCALE_DOWN_THRESHOLD - adjustment
             
@@ -350,11 +350,10 @@ async def autoscaler_task():
             try:
                 log_line = (
                     f"{time.strftime('%Y-%m-%d %H:%M:%S')}, "
-                    f"{instant_ttft*1000:.2f}, {smoothed_ttft*1000:.2f}, {TTFT_TARGET_SECONDS*1000:.0f}, "
-                    f"{ttft_error*1000:.2f}, {adjustment:.4f}, "
-                    f"{current_up_threshold:.2f}, {current_down_threshold:.2f}, "
-                    f"{len(active_servers_for_metrics)}, {instantaneous_avg_load:.2f}, {smoothed_avg_load:.2f}, "
-                    f"{saturation_ratio:.2f}, {1 if is_near_threshold else 0}\n"
+                    f"{instant_ttft*1000:.0f}, {smoothed_ttft*1000:.0f}, {smoothed_tokens:.0f}, "
+                    f"{dynamic_target*1000:.0f}, {ttft_error*1000:.0f}, {adjustment:.2f}, "
+                    f"{current_up_threshold:.1f}, {current_down_threshold:.1f}, "
+                    f"{len(active_servers_for_metrics)}, {smoothed_avg_load:.1f}, {saturation_ratio:.2f}\n"
                 )
                 with open(TTFT_LOG_FILE, "a") as f: f.write(log_line)
             except Exception as e: print(f"Logging Error: {e}")
@@ -362,21 +361,14 @@ async def autoscaler_task():
             # --- CONSOLE REPORT ---
             server_details = []
             for server, metrics in zip(active_servers_for_metrics, metric_results):
-                r = metrics.get('running', 0)
-                w = metrics.get('waiting', 0)
+                r, w = metrics.get('running', 0), metrics.get('waiting', 0)
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
             
-            # Determine Trigger Status String
-            triggers = []
-            if is_saturated: triggers.append("SAT")
-            if is_near_threshold: triggers.append("PROX")
-            status_tag = f"ACTIVE ({'+'.join(triggers)})" if triggers else "IDLE"
-            
+            status_tag = "ACTIVE" if should_activate else "IDLE"
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
-            print(f"TTFT : Smooth: {smoothed_ttft*1000:.0f}ms | Err: {ttft_error*1000:.0f}ms")
-            print(f"CTRL : [{status_tag}] Sat: {saturation_ratio*100:.0f}% | Prox: {is_near_threshold}")
-            print(f"ADJ  : {adjustment:.2f} -> UP {current_up_threshold:.1f} / DOWN {current_down_threshold:.1f}")
-            print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Servers: {len(active_servers_for_metrics)}")
+            print(f"INPUT: Avg Tokens: {smoothed_tokens:.0f} -> Exp. Prefill: {(dynamic_target-BASE_TTFT_TARGET_SECONDS)*1000:.0f}ms")
+            print(f"TTFT : Measured: {smoothed_ttft*1000:.0f}ms | Target: {dynamic_target*1000:.0f}ms | Residual Err: {ttft_error*1000:.0f}ms")
+            print(f"CTRL : [{status_tag}] Adj: {adjustment:.2f} -> UP {current_up_threshold:.1f}")
             print(f"DTLS : {' | '.join(server_details)}")
 
             # --- DECISION LOGIC ---
@@ -398,8 +390,6 @@ async def autoscaler_task():
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     print(f" (Scaling Up by {num_to_scale})")
                     if await scale_up(count=num_to_scale): last_scaling_time = time.time()
-
-            last_total_load = total_load
 
 async def startup_tasks():
     initial_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
