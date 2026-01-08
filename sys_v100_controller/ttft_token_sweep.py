@@ -122,8 +122,8 @@ async def run_experiment(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     
     # Define Sweep Parameters
-    concurrency_levels = [0, 5, 10, 20] # Add more as needed
-    token_lengths = [512, 1024, 2048]     # Add more as needed
+    concurrency_levels = [0, 5, 10, 20, 30, 40, 50] # Add more as needed
+    token_lengths = [50, 100, 500, 1000, 2000, 4000]     # Add more as needed
     
     # Pre-generate a simple prompt for background noise (fixed length ~200 tokens)
     bg_prompt = generate_fixed_prompt(tokenizer, 200)
