@@ -20,7 +20,7 @@ SCALE_DOWN_THRESHOLD = 11
 SCALE_UP_THRESHOLD = 21
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 1
+MIN_ACTIVE_SERVERS = 2
 SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
@@ -34,7 +34,7 @@ DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
 
 # --- P-Controller Configuration (Physically Tuned) ---
-TTFT_TARGET_SECONDS = 3
+TTFT_TARGET_SECONDS = 0.2 
 QUEUE_COST_MS_PER_REQUEST = 521.62 
 
 # Physics-based Gain
@@ -47,11 +47,13 @@ TTFT_HISTORY_SIZE = 5
 TTFT_DEADBAND = 0.1 * TTFT_TARGET_SECONDS  
 MAX_THRESHOLD_CHANGE_PER_STEP = 2.0 
 
-# --- NEW: Saturation Filter ---
-# Only trigger P-Controller if this percentage of active servers have a queue.
-# 0.5 means: "Don't panic unless at least 50% of servers are busy."
-# This filters out single-server hotspots caused by bad load balancing.
-QUEUE_SATURATION_RATIO = 0.49
+# --- ACTIVATION TRIGGERS ---
+# 1. Saturation: Trigger if >50% of servers have waiting requests.
+QUEUE_SATURATION_RATIO = 0.5
+
+# 2. Proximity: Trigger if System Load > 80% of the Base Up Threshold.
+# If Threshold is 21, controller wakes up at load ~16.8 to prevent latency spikes.
+LOAD_PROXIMITY_RATIO = 0.8
 
 # Limits
 MIN_DYNAMIC_UP_THRESHOLD = 10
@@ -64,7 +66,7 @@ MAX_DYNAMIC_DOWN_THRESHOLD = 30
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
     # {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
-    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    {"host": "localhost", "port": 8001, "status": "active", "rank": 1, "shared": True},
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
 
@@ -250,9 +252,9 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started with Balanced P-Controller...")
+    print(f"🚀 Autoscaler started with Hybrid P-Controller (Saturation + Proximity)...")
     print(f"ℹ️  Queue Cost: {QUEUE_COST_MS_PER_REQUEST}ms/req -> Kp: {TTFT_KP:.3f}")
-    print(f"ℹ️  Saturation Trigger: >{QUEUE_SATURATION_RATIO*100:.0f}% of servers must have waiting requests")
+    print(f"ℹ️  Triggers: Saturation > {QUEUE_SATURATION_RATIO*100:.0f}%  OR  Load > {LOAD_PROXIMITY_RATIO*100:.0f}% of Threshold")
 
     last_scaling_time = 0
     load_history = []
@@ -269,7 +271,7 @@ async def autoscaler_task():
     # Ensure Log Header
     try:
         with open(TTFT_LOG_FILE, "x") as f:
-            f.write("Timestamp, Instant_TTFT_ms, Smoothed_TTFT_ms, Target_ms, Error_ms, Adjustment, Up_Threshold, Down_Threshold, Active_Servers, Instant_Load, Smoothed_Load, Saturation_Ratio\n")
+            f.write("Timestamp, Instant_TTFT_ms, Smoothed_TTFT_ms, Target_ms, Error_ms, Adjustment, Up_Threshold, Down_Threshold, Active_Servers, Instant_Load, Smoothed_Load, Saturation_Ratio, Proximity_Triggered\n")
     except FileExistsError: pass
 
     async with httpx.AsyncClient() as client:
@@ -283,10 +285,8 @@ async def autoscaler_task():
             metric_tasks = [get_server_metrics(server, client) for server in active_servers_for_metrics]
             metric_results = await asyncio.gather(*metric_tasks)
 
-            # --- CALCULATE SATURATION & LOAD ---
+            # --- CALCULATE LOAD & TRIGGERS ---
             waiting_counts = [r['waiting'] for r in metric_results]
-            
-            # Count how many servers actually have a queue
             servers_with_waiting = sum(1 for w in waiting_counts if w > 0)
             saturation_ratio = servers_with_waiting / len(active_servers_for_metrics)
             
@@ -296,7 +296,7 @@ async def autoscaler_task():
             load_history.append(instantaneous_avg_load)
             if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
             smoothed_avg_load = np.mean(load_history)
-
+            
             # --- TTFT DATA COLLECTION ---
             curr_ttft_sum = sum(r['ttft_sum'] for r in metric_results)
             curr_ttft_count = sum(r['ttft_count'] for r in metric_results)
@@ -309,7 +309,6 @@ async def autoscaler_task():
                 instant_ttft = delta_ttft_sum / delta_ttft_count
                 ttft_history.append(instant_ttft)
             
-            # Handle Restarts
             if curr_ttft_count >= last_ttft_count:
                 last_ttft_sum = curr_ttft_sum
                 last_ttft_count = curr_ttft_count
@@ -325,18 +324,19 @@ async def autoscaler_task():
             adjustment = 0.0
             ttft_error = 0.0
             
-            # --- SATURATION TRIGGER CHECK ---
-            # 1. Is there ANY waiting request?
-            # 2. Is the queue distributed across enough servers? (Saturation Ratio)
+            # --- DUAL TRIGGER CHECK ---
             is_saturated = saturation_ratio >= QUEUE_SATURATION_RATIO
+            # Check against BASE threshold to see if we are "full"
+            is_near_threshold = smoothed_avg_load >= (SCALE_UP_THRESHOLD * LOAD_PROXIMITY_RATIO)
+            
+            should_activate = is_saturated or is_near_threshold
 
-            if is_saturated and smoothed_ttft > 0:
+            if should_activate and smoothed_ttft > 0:
                 ttft_error = smoothed_ttft - TTFT_TARGET_SECONDS
                 if abs(ttft_error) > TTFT_DEADBAND:
                     raw_adjustment = TTFT_KP * ttft_error
                     adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
             else:
-                # Reset to default if saturation is low (imbalanced queue) or TTFT invalid
                 adjustment = 0.0
 
             # Apply Adjustment
@@ -353,7 +353,8 @@ async def autoscaler_task():
                     f"{instant_ttft*1000:.2f}, {smoothed_ttft*1000:.2f}, {TTFT_TARGET_SECONDS*1000:.0f}, "
                     f"{ttft_error*1000:.2f}, {adjustment:.4f}, "
                     f"{current_up_threshold:.2f}, {current_down_threshold:.2f}, "
-                    f"{len(active_servers_for_metrics)}, {instantaneous_avg_load:.2f}, {smoothed_avg_load:.2f}, {saturation_ratio:.2f}\n"
+                    f"{len(active_servers_for_metrics)}, {instantaneous_avg_load:.2f}, {smoothed_avg_load:.2f}, "
+                    f"{saturation_ratio:.2f}, {1 if is_near_threshold else 0}\n"
                 )
                 with open(TTFT_LOG_FILE, "a") as f: f.write(log_line)
             except Exception as e: print(f"Logging Error: {e}")
@@ -365,10 +366,15 @@ async def autoscaler_task():
                 w = metrics.get('waiting', 0)
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
             
-            status_tag = "ACTIVE" if is_saturated else "IDLE/IMBALANCED"
+            # Determine Trigger Status String
+            triggers = []
+            if is_saturated: triggers.append("SAT")
+            if is_near_threshold: triggers.append("PROX")
+            status_tag = f"ACTIVE ({'+'.join(triggers)})" if triggers else "IDLE"
+            
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
             print(f"TTFT : Smooth: {smoothed_ttft*1000:.0f}ms | Err: {ttft_error*1000:.0f}ms")
-            print(f"CTRL : [{status_tag}] Saturation: {saturation_ratio*100:.0f}% (Target {QUEUE_SATURATION_RATIO*100:.0f}%)")
+            print(f"CTRL : [{status_tag}] Sat: {saturation_ratio*100:.0f}% | Prox: {is_near_threshold}")
             print(f"ADJ  : {adjustment:.2f} -> UP {current_up_threshold:.1f} / DOWN {current_down_threshold:.1f}")
             print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Servers: {len(active_servers_for_metrics)}")
             print(f"DTLS : {' | '.join(server_details)}")
