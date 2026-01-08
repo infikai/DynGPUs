@@ -34,7 +34,7 @@ DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
 
 # --- P-Controller Configuration (Physically Tuned) ---
-TTFT_TARGET_SECONDS = 2
+TTFT_TARGET_SECONDS = 2.5
 QUEUE_COST_MS_PER_REQUEST = 521.62 
 
 # Physics-based Gain
