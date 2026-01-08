@@ -146,8 +146,8 @@ async def run_experiment(args):
     token_lengths = [50, 100, 500, 1000, 2000, 4000]     # Add more as needed
     
     # Background Noise Config
-    bg_min_input = 256
-    bg_max_input = 2048
+    bg_min_input = 200
+    bg_max_input = 2000
     # ---------------------
 
     final_results = [] 
