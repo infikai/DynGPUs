@@ -32,10 +32,10 @@ LOAD_HISTORY_SIZE = 12
 
 # --- Feedforward P-Controller Configuration ---
 # Base Target: Min latency for tiny request
-BASE_TTFT_TARGET_SECONDS = 0.05 
+BASE_TTFT_TARGET_SECONDS = 2.0 
 
 # Feedforward Gain: Expected processing time per input token
-PREFILL_MS_PER_TOKEN = 0.4  
+PREFILL_MS_PER_TOKEN = 0  
 
 # P-Controller Gain
 QUEUE_COST_MS_PER_REQUEST = 521.62 
