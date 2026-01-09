@@ -15,7 +15,7 @@ import logging # MODIFICATION: Import logging
 import gc
 
 # Hyperparameters
-EPOCHS = 90
+EPOCHS = 35
 
 class TrainingState:
     def __init__(self):
