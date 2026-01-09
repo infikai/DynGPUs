@@ -98,11 +98,7 @@ def load_trace_file(filepath: str) -> List[Request]:
 # --- Core Executor ---
 
 async def process_request(request: Request, api_url: str, model_name: str) -> RequestResult:
-    """
-    Coroutine to send one HTTP request. 
-    MODIFIED: Uses line-based iteration to correctly parse SSE (Server-Sent Events)
-    and match vLLM benchmark token counting behavior.
-    """
+    """Coroutine to send one HTTP request to the single API target."""
     
     result = RequestResult(request_id=request.request_id, success=False, output_len=0, stage=request.stage)
     
@@ -111,70 +107,49 @@ async def process_request(request: Request, api_url: str, model_name: str) -> Re
         "prompt": request.prompt,
         "max_tokens": request.output_len,
         "stream": True,
-        "ignore_eos": False, # vLLM bench often uses this, but strictly dependent on your use case
     }
     
     result.start_time = time.perf_counter()
     generated_tokens = 0
     
-    # Fresh connection for every request to simulate real traffic conditions
+    # Fresh connection/session for every request to ensure distinct traffic
     connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
-    
     timeout = aiohttp.ClientTimeout(
-        total=None, 
-        connect=None, 
-        sock_read=REQUEST_READ_TIMEOUT_SECONDS
+        total=None, # No overall timeout limit
+        connect=None, # No connection timeout limit
+        sock_read=REQUEST_READ_TIMEOUT_SECONDS # Timeout between read chunks
     )
     
     try:
         async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.DummyCookieJar()) as session:
+            # Explicitly set Connection: close header
             async with session.post(
                 url=api_url, 
                 json=payload, 
                 headers={"Connection": "close"},
-                timeout=timeout
+                timeout=timeout  # <--- HERE
             ) as response:
-                
                 if response.status != 200:
-                    print(f"Error: Request {request.request_id} failed with status {response.status}")
+                    print(f"Error: Request {request.request_id} failed with status {response.status} from {api_url}")
                     result.end_time = time.perf_counter()
                     return result
                 
-                # Iterate over lines (SSE format) instead of arbitrary chunks
-                async for line in response.content:
-                    # Filter out keep-alive newlines
-                    line = line.strip()
-                    if not line:
-                        continue
-                        
-                    # Parse Server-Sent Events (SSE)
-                    if line.startswith(b"data: "):
-                        data_str = line[6:] # Strip "data: " prefix
-                        
-                        # Check for stream end
-                        if data_str == b"[DONE]":
-                            continue
-                            
-                        # Mark First Token Time (TTFT)
-                        # We do this strictly on the first valid data chunk
-                        if generated_tokens == 0:
-                            result.first_token_time = time.perf_counter()
-                            
-                        # Track token timestamps
-                        result.token_timestamps.append(time.perf_counter())
+                first_token_received = False
+                async for chunk in response.content.iter_any():
+                    token_time = time.perf_counter()
+                    if not first_token_received:
+                        result.first_token_time = token_time
+                        first_token_received = True
+                    result.token_timestamps.append(token_time)
+                    if chunk.strip():
                         generated_tokens += 1
 
         result.end_time = time.perf_counter()
-        
-        # If the request was successful but produced 0 tokens (rare), handle gracefully
-        if generated_tokens == 0:
-             result.first_token_time = result.end_time
-
         result.output_len = generated_tokens
         result.success = True
         
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        # print(f"Error processing request {request.request_id}: {e}")
+    except aiohttp.ClientError as e:
+        # print(f"Error processing request {request.request_id} to {api_url}: {e}")
         result.end_time = time.perf_counter()
     
     return result
@@ -206,7 +181,6 @@ def prepare_requests(all_requests: List[Request], stages: Dict[str, int], stage_
         extended_requests = all_requests
         
     # 3. Sample exactly the number of requests needed
-    random.seed(42)
     sampled_requests = random.sample(extended_requests, total_requests_needed)
     
     # 4. Partition and assign stage metadata
@@ -319,18 +293,26 @@ def save_results_to_file(results: List[RequestResult], filename: str):
 def calculate_metrics(
     results: List[RequestResult],
     duration: float,
+    summary_filename: str = "summary.txt"
 ):
-    """Calculates and prints performance metrics."""
+    """Calculates, prints, and saves performance metrics."""
+    
+    # Helper to print to console AND append to file buffer
+    summary_lines = []
+    def log(msg=""):
+        print(msg)
+        summary_lines.append(str(msg))
+
     completed_requests = sum(1 for r in results if r.success)
     total_output_tokens = sum(r.output_len for r in results if r.success)
 
-    print("\n" + "="*50)
-    print("=============== Benchmark Summary ================")
-    print("="*50)
-    print(f"Total benchmark time: {duration:.2f} s")
-    print(f"Total requests processed: {completed_requests} / {len(results)}")
-    print(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
-    print(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
+    log("="*50)
+    log("=============== Benchmark Summary ================")
+    log("="*50)
+    log(f"Total benchmark time: {duration:.2f} s")
+    log(f"Total requests processed: {completed_requests} / {len(results)}")
+    log(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
+    log(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
 
     # --- Metrics Per Stage ---
     stage_metrics = {}
@@ -340,8 +322,8 @@ def calculate_metrics(
         if res.success:
             stage_metrics[res.stage].append(res)
             
-    print("\n" + "="*50)
-    print("============ Stage-Specific Metrics =============")
+    log("\n" + "="*50)
+    log("============ Stage-Specific Metrics =============")
     
     for stage_name, stage_results in stage_metrics.items():
         if not stage_results: continue
@@ -352,10 +334,10 @@ def calculate_metrics(
         stage_completed = len(stage_results)
         stage_tokens = sum(r.output_len for r in stage_results)
 
-        print(f"\n--- {stage_name} (Target RPS: {BENCHMARK_STAGES.get(stage_name)}) ---")
-        print(f"  Requests Completed: {stage_completed}")
-        print(f"  Stage Throughput (RPS): {stage_completed / stage_duration:.2f}")
-        print(f"  Stage Throughput (Tokens/sec): {stage_tokens / stage_duration:.2f}")
+        log(f"\n--- {stage_name} (Target RPS: {BENCHMARK_STAGES.get(stage_name)}) ---")
+        log(f"  Requests Completed: {stage_completed}")
+        log(f"  Stage Throughput (RPS): {stage_completed / stage_duration:.2f}")
+        log(f"  Stage Throughput (Tokens/sec): {stage_tokens / stage_duration:.2f}")
 
 
     # --- Overall Latency Metrics ---
@@ -374,17 +356,26 @@ def calculate_metrics(
     def print_latency_stats(name, latencies_sec):
         if not latencies_sec: return
         latencies_ms = np.array(latencies_sec) * 1000
-        print(f"Mean {name} (ms):   {np.mean(latencies_ms):.2f}")
-        print(f"Median {name} (ms): {np.median(latencies_ms):.2f}")
-        print(f"P99 {name} (ms):    {np.percentile(latencies_ms, 99):.2f}")
+        log(f"Mean {name} (ms):   {np.mean(latencies_ms):.2f}")
+        log(f"Median {name} (ms): {np.median(latencies_ms):.2f}")
+        log(f"P99 {name} (ms):    {np.percentile(latencies_ms, 99):.2f}")
 
-    print("\n" + "-"*15 + "Time to First Token (Overall)" + "-"*15)
+    log("\n" + "-"*15 + "Time to First Token (Overall)" + "-"*15)
     print_latency_stats("TTFT", ttfts)
-    print("\n" + "-----Time per Output Token (Overall, excl. 1st token)------")
+    log("\n" + "-----Time per Output Token (Overall, excl. 1st token)------")
     print_latency_stats("TPOT", tpots)
-    print("\n" + "-"*15 + "Inter-token Latency (Overall)" + "-"*15)
+    log("\n" + "-"*15 + "Inter-token Latency (Overall)" + "-"*15)
     print_latency_stats("ITL", itls)
-    print("="*50)
+    log("="*50)
+    log("\n")
+
+    # Save summary to file
+    try:
+        with open(summary_filename, "w") as f:
+            f.write("\n".join(summary_lines))
+        print(f"\nSummary text saved to {summary_filename}")
+    except Exception as e:
+        print(f"\nError saving summary text file: {e}")
 
 
 # --- Main Execution ---
@@ -404,7 +395,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-file",
         type=str,
-        default="./staged_benchmark_results.jsonl",
+        default="./results.jsonl",
         help="Path to a JSONL file to save detailed results for each request."
     )
     parser.add_argument(
