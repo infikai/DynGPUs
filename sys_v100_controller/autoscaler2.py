@@ -34,7 +34,7 @@ LOAD_HISTORY_SIZE = 12
 # NOTE: To see the threshold rise when latency is ~0.7s, 
 # we keep this high (e.g. 0.5s or higher). 
 # If you want 50ms latency, set this to 0.05.
-BASE_TTFT_TARGET_SECONDS = 0.05 
+BASE_TTFT_TARGET_SECONDS = 2.0
 
 PREFILL_MS_PER_TOKEN = 0.4  
 
