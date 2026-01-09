@@ -19,7 +19,7 @@ SCALE_DOWN_THRESHOLD = 11
 SCALE_UP_THRESHOLD = 21
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 1  # Updated
+MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
@@ -30,22 +30,26 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 # --- Unaggressive/Anticipatory Scaling Parameters ---
 LOAD_HISTORY_SIZE = 12
 
-# --- P-Controller & Feedforward Configuration ---
-BASE_TTFT_TARGET_SECONDS = 2
+# --- Feedforward P-Controller Configuration ---
+# NOTE: To see the threshold rise when latency is ~0.7s, 
+# we keep this high (e.g. 0.5s or higher). 
+# If you want 50ms latency, set this to 0.05.
+BASE_TTFT_TARGET_SECONDS = 0.05 
+
 PREFILL_MS_PER_TOKEN = 0.4  
 
 QUEUE_COST_MS_PER_REQUEST = 521.62 
 THEORETICAL_KP = 1.0 / (QUEUE_COST_MS_PER_REQUEST / 1000.0)
-GAIN_FACTOR = 1.2
+GAIN_FACTOR = 2.5 
 TTFT_KP = THEORETICAL_KP * GAIN_FACTOR
 
 # Stabilization
 TTFT_HISTORY_SIZE = 5
-MAX_THRESHOLD_CHANGE_PER_STEP = 4.0 
+MAX_THRESHOLD_CHANGE_PER_STEP = 2.0 
 
 # Triggers
 QUEUE_SATURATION_RATIO = 0.5
-LOAD_PROXIMITY_RATIO = 0.9
+LOAD_PROXIMITY_RATIO = 0.8
 
 # Limits
 MIN_DYNAMIC_UP_THRESHOLD = 10
@@ -57,12 +61,9 @@ MAX_DYNAMIC_DOWN_THRESHOLD = 30
 
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
-    # {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
-    
-    # CHANGED: This one (8001) is now sleeping
+    # 8001 starts sleeping
     {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
-    
-    # This one (8002) is active
+    # 8002 starts active
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
 
@@ -250,7 +251,7 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started with Feedforward (Input-Aware) P-Controller...")
+    print(f"🚀 Autoscaler started with Bidirectional Feedforward Controller...")
     print(f"ℹ️  Queue Cost: {QUEUE_COST_MS_PER_REQUEST:.2f}ms/req | Prefill Cost: {PREFILL_MS_PER_TOKEN:.2f}ms/token")
     print(f"ℹ️  Triggers: Saturation > {QUEUE_SATURATION_RATIO*100:.0f}%  OR  Load > {LOAD_PROXIMITY_RATIO*100:.0f}% of Threshold")
 
@@ -327,6 +328,7 @@ async def autoscaler_task():
             ttft_error = 0.0
             dynamic_target = BASE_TTFT_TARGET_SECONDS
 
+            # Triggers (Saturation or Proximity)
             is_saturated = saturation_ratio >= QUEUE_SATURATION_RATIO
             is_near_threshold = smoothed_avg_load >= (SCALE_UP_THRESHOLD * LOAD_PROXIMITY_RATIO)
             should_activate = (is_saturated or is_near_threshold) and smoothed_ttft > 0
@@ -336,8 +338,13 @@ async def autoscaler_task():
                 ttft_error = smoothed_ttft - dynamic_target
                 deadband = 0.05 * dynamic_target
                 
-                if ttft_error > deadband:
+                # --- KEY FIX: Bidirectional Check ---
+                # Before: if ttft_error > deadband: (Only triggered on SLOW)
+                # Now:    if abs(ttft_error) > deadband: (Triggers on SLOW or FAST)
+                if abs(ttft_error) > deadband:
                     raw_adjustment = TTFT_KP * ttft_error
+                    # If error is negative (Fast), adjustment is negative.
+                    # Negative adjustment -> Threshold increases (21 - (-5) = 26)
                     adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
 
             new_up = SCALE_UP_THRESHOLD - adjustment
@@ -373,6 +380,9 @@ async def autoscaler_task():
 
             # --- DECISION LOGIC ---
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
+                # Use current_up_threshold and current_down_threshold for decisions
+                
+                # Check Scale Down
                 if (smoothed_avg_load < current_down_threshold and 
                     instantaneous_avg_load < current_down_threshold and 
                     (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < current_up_threshold):
@@ -381,7 +391,8 @@ async def autoscaler_task():
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     print(f" (Scaling Down by {num_to_scale})")
                     if await scale_down(count=num_to_scale): last_scaling_time = time.time()
-                        
+                
+                # Check Scale Up
                 elif (smoothed_avg_load > current_up_threshold and 
                       instantaneous_avg_load > current_up_threshold and 
                       (total_load / (len(active_servers_for_metrics)+1)) > current_down_threshold):
