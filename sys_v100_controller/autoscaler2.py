@@ -31,13 +31,9 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 LOAD_HISTORY_SIZE = 12
 
 # --- Feedforward P-Controller Configuration ---
-# Base Target: Min latency for tiny request
-BASE_TTFT_TARGET_SECONDS = 2.0 
+BASE_TTFT_TARGET_SECONDS = 2
+PREFILL_MS_PER_TOKEN = 0
 
-# Feedforward Gain: Expected processing time per input token
-PREFILL_MS_PER_TOKEN = 0  
-
-# P-Controller Gain
 QUEUE_COST_MS_PER_REQUEST = 521.62 
 THEORETICAL_KP = 1.0 / (QUEUE_COST_MS_PER_REQUEST / 1000.0)
 GAIN_FACTOR = 2.5 
@@ -47,9 +43,19 @@ TTFT_KP = THEORETICAL_KP * GAIN_FACTOR
 TTFT_HISTORY_SIZE = 5
 MAX_THRESHOLD_CHANGE_PER_STEP = 2.0 
 
+# --- NEW: Queue Watchdog Configuration ---
+# If waiting requests > 5, we consider this critical
+WAITING_THRESHOLD_CRITICAL = 5
+
+# Penalties (How much to lower the threshold)
+# 1. Growing Penalty: If queue increased since last check (e.g. 1 -> 3)
+QUEUE_GROWTH_PENALTY = 2.0 
+# 2. Critical Penalty: If queue is simply too large (> 5)
+QUEUE_CRITICAL_PENALTY = 5.0 
+
 # Triggers
-QUEUE_SATURATION_RATIO = 0.5  # Trigger if >50% servers have queue
-LOAD_PROXIMITY_RATIO = 0.8    # Trigger if Load > 80% of Threshold
+QUEUE_SATURATION_RATIO = 0.5
+LOAD_PROXIMITY_RATIO = 0.8
 
 # Limits
 MIN_DYNAMIC_UP_THRESHOLD = 10
@@ -61,9 +67,7 @@ MAX_DYNAMIC_DOWN_THRESHOLD = 30
 
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
-    # 8001 starts sleeping
     {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
-    # 8002 starts active
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
 
@@ -251,9 +255,9 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started with Bidirectional Feedforward Controller...")
-    print(f"ℹ️  Queue Cost: {QUEUE_COST_MS_PER_REQUEST:.2f}ms/req | Prefill Cost: {PREFILL_MS_PER_TOKEN:.2f}ms/token")
-    print(f"ℹ️  Triggers: Saturation > {QUEUE_SATURATION_RATIO*100:.0f}%  OR  Load > {LOAD_PROXIMITY_RATIO*100:.0f}% of Threshold")
+    print(f"🚀 Autoscaler started with Hybrid Queue-Aware Feedforward Controller...")
+    print(f"ℹ️  Queue Logic: Growth Penalty={QUEUE_GROWTH_PENALTY} | Critical (>5) Penalty={QUEUE_CRITICAL_PENALTY}")
+    print(f"ℹ️  TTFT Logic: Cost={PREFILL_MS_PER_TOKEN}ms/tok | Target={BASE_TTFT_TARGET_SECONDS}s")
 
     last_scaling_time = 0
     load_history = []
@@ -261,6 +265,7 @@ async def autoscaler_task():
     last_ttft_sum = 0.0
     last_ttft_count = 0.0
     last_prompt_tokens = 0.0
+    last_total_waiting = 0 # New state for Queue Watchdog
     
     ttft_history = deque(maxlen=TTFT_HISTORY_SIZE)
     avg_tokens_history = deque(maxlen=TTFT_HISTORY_SIZE)
@@ -284,8 +289,9 @@ async def autoscaler_task():
             metric_tasks = [get_server_metrics(server, client) for server in active_servers_for_metrics]
             metric_results = await asyncio.gather(*metric_tasks)
 
-            # --- 1. CALCULATE LOAD & SATURATION ---
+            # --- 1. CALCULATE LOAD & WAITING ---
             waiting_counts = [r['waiting'] for r in metric_results]
+            total_waiting = sum(waiting_counts)
             servers_with_waiting = sum(1 for w in waiting_counts if w > 0)
             saturation_ratio = servers_with_waiting / len(active_servers_for_metrics)
             
@@ -320,31 +326,49 @@ async def autoscaler_task():
                 ttft_history.append(instant_ttft)
                 avg_tokens_history.append(avg_prompt_tokens)
 
-            # --- 3. FEEDFORWARD CONTROL LOGIC ---
+            # --- 3. QUEUE WATCHDOG (Preventative Logic) ---
+            queue_adjustment = 0.0
+            
+            # Condition A: Queue is critical
+            if total_waiting > WAITING_THRESHOLD_CRITICAL:
+                queue_adjustment = QUEUE_CRITICAL_PENALTY
+            
+            # Condition B: Queue is growing (and not zero)
+            elif total_waiting > last_total_waiting and total_waiting > 0:
+                queue_adjustment = QUEUE_GROWTH_PENALTY
+
+            # Update Queue State
+            last_total_waiting = total_waiting
+
+            # --- 4. FEEDFORWARD CONTROL LOGIC ---
             smoothed_ttft = np.mean(ttft_history) if ttft_history else 0.0
             smoothed_tokens = np.mean(avg_tokens_history) if avg_tokens_history else 0.0
 
-            adjustment = 0.0
+            ttft_adjustment = 0.0
             ttft_error = 0.0
             dynamic_target = BASE_TTFT_TARGET_SECONDS
 
-            # Triggers (Saturation or Proximity)
+            # Triggers
             is_saturated = saturation_ratio >= QUEUE_SATURATION_RATIO
             is_near_threshold = smoothed_avg_load >= (SCALE_UP_THRESHOLD * LOAD_PROXIMITY_RATIO)
-            should_activate = (is_saturated or is_near_threshold) and smoothed_ttft > 0
+            should_activate_ttft = (is_saturated or is_near_threshold) and smoothed_ttft > 0
 
-            if should_activate:
+            if should_activate_ttft:
                 dynamic_target = BASE_TTFT_TARGET_SECONDS + (smoothed_tokens * PREFILL_MS_PER_TOKEN / 1000.0)
                 ttft_error = smoothed_ttft - dynamic_target
                 deadband = 0.05 * dynamic_target
                 
-                # Bidirectional Logic: Scales UP if slow (error>0), Scales DOWN if fast (error<0)
                 if abs(ttft_error) > deadband:
                     raw_adjustment = TTFT_KP * ttft_error
-                    adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
+                    ttft_adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
 
-            new_up = SCALE_UP_THRESHOLD - adjustment
-            new_down = SCALE_DOWN_THRESHOLD - adjustment
+            # --- 5. COMBINE ADJUSTMENTS ---
+            # We take the MAXIMUM of both adjustments to prioritize safety.
+            # If Queue Watchdog screams "Drop by 5" and TTFT says "Raise by 2", we Drop by 5.
+            final_adjustment = max(ttft_adjustment, queue_adjustment)
+
+            new_up = SCALE_UP_THRESHOLD - final_adjustment
+            new_down = SCALE_DOWN_THRESHOLD - final_adjustment
             
             current_up_threshold = max(MIN_DYNAMIC_UP_THRESHOLD, min(MAX_DYNAMIC_UP_THRESHOLD, new_up))
             current_down_threshold = max(MIN_DYNAMIC_DOWN_THRESHOLD, min(MAX_DYNAMIC_DOWN_THRESHOLD, new_down))
@@ -354,7 +378,7 @@ async def autoscaler_task():
                 log_line = (
                     f"{time.strftime('%Y-%m-%d %H:%M:%S')}, "
                     f"{instant_ttft*1000:.0f}, {smoothed_ttft*1000:.0f}, {smoothed_tokens:.0f}, "
-                    f"{dynamic_target*1000:.0f}, {ttft_error*1000:.0f}, {adjustment:.2f}, "
+                    f"{dynamic_target*1000:.0f}, {ttft_error*1000:.0f}, {final_adjustment:.2f}, "
                     f"{current_up_threshold:.1f}, {current_down_threshold:.1f}, "
                     f"{len(active_servers_for_metrics)}, {smoothed_avg_load:.1f}, {saturation_ratio:.2f}\n"
                 )
@@ -367,18 +391,18 @@ async def autoscaler_task():
                 r, w = metrics.get('running', 0), metrics.get('waiting', 0)
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
             
-            status_tag = "ACTIVE" if should_activate else "IDLE"
+            status_tag = "ACTIVE" if (should_activate_ttft or queue_adjustment > 0) else "IDLE"
+            adj_source = "QUEUE" if queue_adjustment > ttft_adjustment else "TTFT"
+            
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
-            print(f"INPUT: Avg Tokens: {smoothed_tokens:.0f} -> Exp. Prefill: {(dynamic_target-BASE_TTFT_TARGET_SECONDS)*1000:.0f}ms")
-            print(f"TTFT : Measured: {smoothed_ttft*1000:.0f}ms | Target: {dynamic_target*1000:.0f}ms | Residual Err: {ttft_error*1000:.0f}ms")
-            print(f"CTRL : [{status_tag}] Adj: {adjustment:.2f} -> UP {current_up_threshold:.1f}")
+            print(f"QUEUE: Total: {total_waiting} (Prev: {last_total_waiting}) -> Watchdog Adj: {queue_adjustment:.1f}")
+            print(f"TTFT : Smooth: {smoothed_ttft*1000:.0f}ms | Target: {dynamic_target*1000:.0f}ms | Err: {ttft_error*1000:.0f}ms")
+            print(f"CTRL : [{status_tag}] Final Adj: {final_adjustment:.2f} ({adj_source}) -> UP {current_up_threshold:.1f}")
             print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Saturation: {saturation_ratio:.2f}")
             print(f"DTLS : {' | '.join(server_details)}")
 
             # --- DECISION LOGIC ---
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
-                # Use current_up_threshold and current_down_threshold for decisions
-                
                 if (smoothed_avg_load < current_down_threshold and 
                     instantaneous_avg_load < current_down_threshold and 
                     (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < current_up_threshold):
