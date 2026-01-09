@@ -7,6 +7,7 @@ global
     daemon
     log /dev/log local0 info
     nbthread 1
+    stats socket /run/haproxy/admin.sock mode 660 level admin
 
 # Default settings that apply to all following sections
 defaults
@@ -14,6 +15,7 @@ defaults
     log global
     option httplog
     option dontlognull
+    option http-server-close
     maxconn 1000
     option forwardfor
     retries 3
