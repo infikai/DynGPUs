@@ -31,13 +31,13 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 LOAD_HISTORY_SIZE = 12
 
 # --- Feedforward P-Controller Configuration ---
-# NOTE: To see the threshold rise when latency is ~0.7s, 
-# we keep this high (e.g. 0.5s or higher). 
-# If you want 50ms latency, set this to 0.05.
-BASE_TTFT_TARGET_SECONDS = 2.0
+# Base Target: Min latency for tiny request
+BASE_TTFT_TARGET_SECONDS = 0.05 
 
-PREFILL_MS_PER_TOKEN = 0
+# Feedforward Gain: Expected processing time per input token
+PREFILL_MS_PER_TOKEN = 0.4  
 
+# P-Controller Gain
 QUEUE_COST_MS_PER_REQUEST = 521.62 
 THEORETICAL_KP = 1.0 / (QUEUE_COST_MS_PER_REQUEST / 1000.0)
 GAIN_FACTOR = 2.5 
@@ -48,8 +48,8 @@ TTFT_HISTORY_SIZE = 5
 MAX_THRESHOLD_CHANGE_PER_STEP = 2.0 
 
 # Triggers
-QUEUE_SATURATION_RATIO = 0.5
-LOAD_PROXIMITY_RATIO = 0.8
+QUEUE_SATURATION_RATIO = 0.5  # Trigger if >50% servers have queue
+LOAD_PROXIMITY_RATIO = 0.8    # Trigger if Load > 80% of Threshold
 
 # Limits
 MIN_DYNAMIC_UP_THRESHOLD = 10
@@ -338,13 +338,9 @@ async def autoscaler_task():
                 ttft_error = smoothed_ttft - dynamic_target
                 deadband = 0.05 * dynamic_target
                 
-                # --- KEY FIX: Bidirectional Check ---
-                # Before: if ttft_error > deadband: (Only triggered on SLOW)
-                # Now:    if abs(ttft_error) > deadband: (Triggers on SLOW or FAST)
+                # Bidirectional Logic: Scales UP if slow (error>0), Scales DOWN if fast (error<0)
                 if abs(ttft_error) > deadband:
                     raw_adjustment = TTFT_KP * ttft_error
-                    # If error is negative (Fast), adjustment is negative.
-                    # Negative adjustment -> Threshold increases (21 - (-5) = 26)
                     adjustment = max(-MAX_THRESHOLD_CHANGE_PER_STEP, min(MAX_THRESHOLD_CHANGE_PER_STEP, raw_adjustment))
 
             new_up = SCALE_UP_THRESHOLD - adjustment
@@ -376,13 +372,13 @@ async def autoscaler_task():
             print(f"INPUT: Avg Tokens: {smoothed_tokens:.0f} -> Exp. Prefill: {(dynamic_target-BASE_TTFT_TARGET_SECONDS)*1000:.0f}ms")
             print(f"TTFT : Measured: {smoothed_ttft*1000:.0f}ms | Target: {dynamic_target*1000:.0f}ms | Residual Err: {ttft_error*1000:.0f}ms")
             print(f"CTRL : [{status_tag}] Adj: {adjustment:.2f} -> UP {current_up_threshold:.1f}")
+            print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Saturation: {saturation_ratio:.2f}")
             print(f"DTLS : {' | '.join(server_details)}")
 
             # --- DECISION LOGIC ---
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 # Use current_up_threshold and current_down_threshold for decisions
                 
-                # Check Scale Down
                 if (smoothed_avg_load < current_down_threshold and 
                     instantaneous_avg_load < current_down_threshold and 
                     (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < current_up_threshold):
@@ -392,7 +388,6 @@ async def autoscaler_task():
                     print(f" (Scaling Down by {num_to_scale})")
                     if await scale_down(count=num_to_scale): last_scaling_time = time.time()
                 
-                # Check Scale Up
                 elif (smoothed_avg_load > current_up_threshold and 
                       instantaneous_avg_load > current_up_threshold and 
                       (total_load / (len(active_servers_for_metrics)+1)) > current_down_threshold):
