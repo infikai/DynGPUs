@@ -15,8 +15,8 @@ ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 11
-SCALE_UP_THRESHOLD = 21
+SCALE_DOWN_THRESHOLD = 15
+SCALE_UP_THRESHOLD = 25
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
