@@ -11,7 +11,7 @@ import os
 import socket
 from sampler import MyElasticSampler
 import argparse
-import logging # MODIFICATION: Import logging
+import logging 
 
 # Hyperparameters
 EPOCHS = 90
@@ -34,7 +34,6 @@ def main():
 
     hvd.init(process_sets="dynamic")
 
-    # MODIFICATION: Set up logging on the root rank
     if hvd.rank() == 0:
         logging.basicConfig(filename='worker_adjustments.log',
                             level=logging.INFO,
@@ -81,7 +80,6 @@ def main():
     hvd_optimizer = None
     fisrt_batch = True
     
-    # MODIFICATION: Initialize timer for periodic logging
     last_log_time = time.time()
     processed = 0
 
@@ -98,20 +96,6 @@ def main():
                 ST_config = time.time()
                 fisrt_batch = True
                 sync = True
-
-                if hvd.rank() == 0:
-                    ST_chk = time.time()
-                    filepath = './checkpoint.pth.tar'
-                    chk_state = {
-                        'model': model.state_dict(),
-                        'optimizer': base_optimizer.state_dict(),
-                    }
-                    torch.save(chk_state, filepath)
-
-                    checkpoint = torch.load(filepath)
-                    model.load_state_dict(checkpoint['model'])
-                    base_optimizer.load_state_dict(checkpoint['optimizer'])
-                    print(f'Chk Cost: {time.time() - ST_chk}s')
 
                 if hvd.rank() == 0:
                     active_ranks = read_active_ranks_from_file()
@@ -150,18 +134,39 @@ def main():
                     root_rank_for_sync = 0
                     if sync:
                         ST_bcast = time.time()
+                        
+                        # --- MODIFICATION START ---
+                        # Prepare state dicts for broadcast on the root rank
+                        if hvd.rank() == root_rank_for_sync:
+                            model_state_dict = model.state_dict()
+                            optim_state_dict = base_optimizer.state_dict()
+                        else:
+                            model_state_dict = None
+                            optim_state_dict = None
+
                         if is_full_world:
                             print('=== Full world case ===')
-                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync)
-                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync)
+                            # Broadcast Model State
+                            model_state_dict = hvd.broadcast_object(model_state_dict, root_rank=root_rank_for_sync, name="model_state_bcast")
+                            # Broadcast Optimizer State
+                            optim_state_dict = hvd.broadcast_object(optim_state_dict, root_rank=root_rank_for_sync, name="optim_state_bcast")
+                            # Broadcast Training State
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, name="BcastState")
-                            print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
                         else:
                             print('=== Partial world case ===')
-                            hvd.broadcast_parameters(model.state_dict(), root_rank=root_rank_for_sync, process_set=active_set)
-                            hvd.broadcast_optimizer_state(base_optimizer, root_rank=root_rank_for_sync, process_set=active_set)
+                            # Broadcast Model State
+                            model_state_dict = hvd.broadcast_object(model_state_dict, root_rank=root_rank_for_sync, process_set=active_set, name="model_state_bcast")
+                            # Broadcast Optimizer State
+                            optim_state_dict = hvd.broadcast_object(optim_state_dict, root_rank=root_rank_for_sync, process_set=active_set, name="optim_state_bcast")
+                            # Broadcast Training State
                             state = hvd.broadcast_object(state, root_rank=root_rank_for_sync, process_set=active_set, name="BcastState")
-                            print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
+
+                        # Load the broadcasted state dicts
+                        model.load_state_dict(model_state_dict)
+                        base_optimizer.load_state_dict(optim_state_dict)
+                        print(f'Whole BCAST cost: {time.time() - ST_bcast}s')
+                        # --- MODIFICATION END ---
+
                     print('==='*5)
 
                     if hvd_optimizer != None:
@@ -181,7 +186,6 @@ def main():
                 config_change_duration = time.time() - ST_config
                 print(f'Config Change Cost: {config_change_duration}s')
                 
-                # MODIFICATION: Log the config change time cost and sync status
                 if hvd.rank() == 0:
                     logging.info(f"Configuration change took {config_change_duration:.4f} seconds. Sync required: {sync}")
 
@@ -195,7 +199,6 @@ def main():
                 new_ranks = None
             new_ranks = hvd.broadcast_object(new_ranks, root_rank=0, name="ranks_check_bcast")
             if new_ranks != current_active_ranks:
-                # MODIFICATION: Log the worker adjustment event
                 if hvd.rank() == 0:
                     logging.info(f"Adjusting workers. Previous: {sorted(current_active_ranks)}, New: {sorted(new_ranks)}")
                 config_changed = True
@@ -210,12 +213,6 @@ def main():
                     output = model(images)
                     loss = F.cross_entropy(output, target)
                     loss.backward()
-                    # if active_set is None:
-                    #     allreduce_name = "grads_full_world"
-                    # else:
-                    #     ranks_str = "_".join(map(str, sorted(current_active_ranks)))
-                    #     allreduce_name = f"grads_set_{ranks_str}"
-                    # allreduce_gradients_manual(model, active_set, name=allreduce_name)
                     hvd_optimizer.step()
                     print(f'One Batch Cost: {time.time() - ST_batch}s')
                     sampler.record_batch(state.batch_idx, args.batch_size)
@@ -231,7 +228,6 @@ def main():
                     fisrt_batch = False
                     END_batch = time.time()
 
-                    # MODIFICATION: Periodic progress logging
                     current_time = time.time()
                     if hvd.rank() == 0 and (current_time - last_log_time) >= 3:
                         logging.info(f"Progress - Epoch: {state.epoch}, Processed: {processed}")
@@ -245,10 +241,8 @@ def main():
             if hvd.rank() not in current_active_ranks:
                 if hvd_optimizer != None:
                     hvd_optimizer.zero_grad()
-                # base_optimizer.zero_grad()
                 move_optimizer_state(base_optimizer, 'cpu')
                 model.cpu()
-                # time.sleep(1)
                 torch.cuda.empty_cache()
             finished_tensor = torch.tensor(epoch_finished)
             finished_tensor = hvd.broadcast_object(finished_tensor, root_rank=0, name="epoch_end_bcast")
