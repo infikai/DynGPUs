@@ -41,7 +41,7 @@ ALL_SERVERS = [
         "protect_expiry": 0.0, "usage_counter": 0 
     },
     {
-        "host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True,
+        "host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": False,
         "protect_expiry": 0.0, "usage_counter": 0 
     },
 ]
