@@ -10,7 +10,7 @@ from typing import List, Dict, Optional
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg"
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
-ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100_long/active_workers.txt"
+ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
 
 # Scaling Thresholds
 SCALE_DOWN_THRESHOLD = 11
