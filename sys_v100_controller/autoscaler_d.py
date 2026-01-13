@@ -99,7 +99,7 @@ async def update_haproxy_config() -> bool:
     active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
     
     server_lines = [
-        f"    server web{i:02d} {s['host']}:{s['port']} check\n"
+        f"    server web{i:02d} {s['host']}:{s['port']}\n"
         for i, s in enumerate(active_servers, start=1)
     ]
     try:
