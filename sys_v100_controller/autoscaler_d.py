@@ -34,7 +34,7 @@ DEEPBOOT_PROTECT_INCREMENT = 15
 
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
-    {"host": "localhost", "port": 8000, "status": "active", "rank": 0, "shared": False},
+    # {"host": "localhost", "port": 8000, "status": "active", "rank": 0, "shared": False},
     # Shared Resources
     {
         "host": "localhost", "port": 8001, "status": "training", "rank": 1, "shared": True,
