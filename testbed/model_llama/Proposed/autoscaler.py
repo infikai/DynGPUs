@@ -16,7 +16,7 @@ TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
 SCALE_DOWN_THRESHOLD = 25
-SCALE_UP_THRESHOLD = 40
+SCALE_UP_THRESHOLD = 45
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
