@@ -12,20 +12,27 @@ import numpy as np
 
 
 # --- Global Configuration ---
-STAGE_DURATION_SECONDS = 300  # 5 minutes per stage
+STAGE_DURATION_SECONDS = 200  # 5 minutes per stage
 BENCHMARK_STAGES = {
-    "Stage 1": 5,
-    "Stage 2": 10,
-    "Stage 3": 17.5,
-    "Stage 4": 15,
-    "Stage 5": 10,
-    "Stage 6": 15,
-    "Stage 7": 17.5,
-    "Stage 8": 20,
-    "Stage 9": 25,
+    "Stage 1": 2.8,
+    "Stage 2": 4.8,
+    "Stage 3": 9.5,
+    "Stage 4": 12.5,
+    "Stage 5": 17.5,
+    "Stage 6": 23,
+    "Stage 7": 20,
+    "Stage 8": 17,
+    "Stage 9": 15,
     "Stage 10": 18,
-    "Stage 11": 25,
-    "Stage 12": 10,
+    "Stage 11": 21,
+    "Stage 12": 25,
+    "Stage 13": 20,
+    "Stage 14": 16,
+    "Stage 15": 18,
+    "Stage 16": 15,
+    "Stage 17": 12,
+    "Stage 18": 10,
+    
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
@@ -241,67 +248,54 @@ async def benchmark(
     """Dispatches requests based on staged RPS, using content from the prepared trace requests."""
     
     all_tasks: List[asyncio.Task] = []
+    benchmark_start_time = time.perf_counter()
     request_iterator = iter(prepared_requests)
 
-    try:
-        for stage_name, rps in stages.items():
-            print(f"\n--- Starting Stage: {stage_name} (RPS: {rps}) for {stage_duration}s ---")
-            stage_start_time = time.perf_counter()
-            
-            target_delay = 1.0 / rps if rps > 0 else float('inf')
-            total_requests_to_dispatch = int(rps * stage_duration)
-            
-            for i in range(total_requests_to_dispatch):
-                
-                # --- Timing Control ---
-                elapsed = time.perf_counter() - stage_start_time
-                expected_next_dispatch_time = (i * target_delay)
-                time_to_wait = expected_next_dispatch_time - elapsed
-                if time_to_wait > 0:
-                    await asyncio.sleep(time_to_wait)
-                
-                # --- Dispatch ---
-                try:
-                    request = next(request_iterator) 
-                except StopIteration:
-                    print("Error: Iterator ran out of requests prematurely. Stopping benchmark.")
-                    break 
-
-                task = asyncio.create_task(process_request(request, api_url, model_name))
-                all_tasks.append(task)
-                
-            print(f"Stage {stage_name} dispatched {total_requests_to_dispatch} requests.")
-            
-            stage_runtime = time.perf_counter() - stage_start_time
-            time_to_wait_after_dispatch = stage_duration - stage_runtime
-            if time_to_wait_after_dispatch > 0:
-                await asyncio.sleep(time_to_wait_after_dispatch)
-            
-            if total_requests_to_dispatch > 0:
-                actual_stage_rps = total_requests_to_dispatch / stage_runtime
-                print(f"  Actual Dispatch RPS during stage: {actual_stage_rps:.2f}")
-
-        print("\nAll stages dispatched. Waiting for all requests to complete...")
-        results = await asyncio.gather(*all_tasks)
-        return results
-
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        print("\n\n!!! Benchmark Interrupted (Ctrl+C) !!!")
-        print("Gathering results from tasks that completed before interruption...")
+    for stage_name, rps in stages.items():
+        print(f"\n--- Starting Stage: {stage_name} (RPS: {rps}) for {stage_duration}s ---")
+        stage_start_time = time.perf_counter()
         
-        # Collect results only from tasks that are completely done
-        partial_results = []
-        for task in all_tasks:
-            if task.done() and not task.cancelled():
-                try:
-                    # Check if the task raised an exception internally
-                    if not task.exception():
-                        partial_results.append(task.result())
-                except Exception:
-                    pass
+        target_delay = 1.0 / rps if rps > 0 else float('inf')
+        total_requests_to_dispatch = int(rps * stage_duration)
         
-        print(f"Recovered {len(partial_results)} completed requests.")
-        return partial_results
+        for i in range(total_requests_to_dispatch):
+            
+            # --- Timing Control ---
+            elapsed = time.perf_counter() - stage_start_time
+            expected_next_dispatch_time = (i * target_delay)
+            time_to_wait = expected_next_dispatch_time - elapsed
+            if time_to_wait > 0:
+                await asyncio.sleep(time_to_wait)
+            
+            # --- Dispatch ---
+            try:
+                # Get the next prepared request from the iterator
+                request = next(request_iterator) 
+            except StopIteration:
+                print("Error: Iterator ran out of requests prematurely. Stopping benchmark.")
+                break # Break out of the stage loop
+
+            # Create and append the task
+            task = asyncio.create_task(process_request(request, api_url, model_name))
+            all_tasks.append(task)
+            
+        print(f"Stage {stage_name} dispatched {total_requests_to_dispatch} requests.")
+        
+        # Wait for the stage duration to pass (allows remaining tasks to run in the background)
+        stage_runtime = time.perf_counter() - stage_start_time
+        time_to_wait_after_dispatch = stage_duration - stage_runtime
+        if time_to_wait_after_dispatch > 0:
+            await asyncio.sleep(time_to_wait_after_dispatch)
+        
+        if total_requests_to_dispatch > 0:
+            actual_stage_rps = total_requests_to_dispatch / stage_runtime
+            print(f"  Actual Dispatch RPS during stage: {actual_stage_rps:.2f}")
+
+
+    print("\nAll stages dispatched. Waiting for all requests to complete...")
+    results = await asyncio.gather(*all_tasks)
+    
+    return results
 
 
 # --- Utilities (saving and metrics) ---
@@ -427,7 +421,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-file",
         type=str,
-        default="./results.jsonl",
+        default="./staged_benchmark_results.jsonl",
         help="Path to a JSONL file to save detailed results for each request."
     )
     parser.add_argument(
