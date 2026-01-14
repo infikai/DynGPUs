@@ -430,21 +430,21 @@ async def autoscaler_task():
             if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
 
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
-                if (smoothed_avg_load < current_down_threshold and 
-                    instantaneous_avg_load < current_down_threshold and 
-                    (total_load / (len(active_servers)-1) if len(active_servers) > 1 else 1)+2 < current_up_threshold):
+                if (smoothed_avg_load < SCALE_DOWN_THRESHOLD and 
+                    instantaneous_avg_load < SCALE_DOWN_THRESHOLD and 
+                    (total_load / (len(active_servers)-1) if len(active_servers) > 1 else 1)+2 < SCALE_UP_THRESHOLD):
                     
-                    deviation = (current_down_threshold - smoothed_avg_load) / current_down_threshold
+                    deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers) * deviation))
                     num_to_scale = min(num_to_scale, 2)
                     print(f" (Scaling Down by {num_to_scale})")
                     if await scale_down(count=num_to_scale): last_scaling_time = time.time()
                 
-                elif (smoothed_avg_load > current_up_threshold and 
-                      instantaneous_avg_load > current_up_threshold and 
-                      (total_load / (len(active_servers)+1)) > current_down_threshold):
+                elif (smoothed_avg_load > SCALE_UP_THRESHOLD and 
+                      instantaneous_avg_load > SCALE_UP_THRESHOLD and 
+                      (total_load / (len(active_servers)+1)) > SCALE_DOWN_THRESHOLD):
                     
-                    deviation = (smoothed_avg_load - current_up_threshold) / current_up_threshold
+                    deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers) * deviation))
                     num_to_scale = min(num_to_scale, 2)
                     print(f" (Scaling Up by {num_to_scale})")
