@@ -14,8 +14,8 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 HOROVOD_HOSTFILE_PATH = "./hostfile.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 25
-SCALE_UP_THRESHOLD = 35
+SCALE_DOWN_THRESHOLD = 30
+SCALE_UP_THRESHOLD = 40
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1

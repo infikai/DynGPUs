@@ -15,8 +15,8 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 13
-SCALE_UP_THRESHOLD = 23
+SCALE_DOWN_THRESHOLD = 30
+SCALE_UP_THRESHOLD = 40
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
@@ -45,13 +45,13 @@ MAX_THRESHOLD_CHANGE_PER_STEP = 2.0
 
 # --- NEW: Queue Watchdog Configuration ---
 # If waiting requests > 5, we consider this critical
-WAITING_THRESHOLD_CRITICAL = 5
+WAITING_THRESHOLD_CRITICAL = 8
 
 # Penalties (How much to lower the threshold)
 # 1. Growing Penalty: If queue increased since last check (e.g. 1 -> 3)
-QUEUE_GROWTH_PENALTY = 2.0 
+QUEUE_GROWTH_PENALTY = 3.0 
 # 2. Critical Penalty: If queue is simply too large (> 5)
-QUEUE_CRITICAL_PENALTY = 5.0 
+QUEUE_CRITICAL_PENALTY = 6.0 
 
 # Triggers
 QUEUE_SATURATION_RATIO = 0.5
