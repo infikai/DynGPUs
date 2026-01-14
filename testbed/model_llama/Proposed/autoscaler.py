@@ -15,12 +15,12 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 22
+SCALE_DOWN_THRESHOLD = 20
 SCALE_UP_THRESHOLD = 38
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
-SCALING_COOLDOWN_SECONDS = 15
+SCALING_COOLDOWN_SECONDS = 30
 MONITOR_INTERVAL_SECONDS = 3
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
 GPU_MEMORY_FREE_THRESHOLD_MB = 5000
@@ -28,10 +28,10 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 10
+LOAD_HISTORY_SIZE = 12
 
 # --- Feedforward P-Controller Configuration ---
-BASE_TTFT_TARGET_SECONDS = 2
+BASE_TTFT_TARGET_SECONDS = 0.8
 PREFILL_MS_PER_TOKEN = 0
 
 QUEUE_COST_MS_PER_REQUEST = 521.62 
@@ -422,6 +422,7 @@ async def autoscaler_task():
                     
                     deviation = (current_down_threshold - smoothed_avg_load) / current_down_threshold
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
+                    num_to_scale = min(num_to_scale, 2)
                     print(f" (Scaling Down by {num_to_scale})")
                     if await scale_down(count=num_to_scale): last_scaling_time = time.time()
                 
