@@ -15,12 +15,12 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 18
+SCALE_DOWN_THRESHOLD = 19
 SCALE_UP_THRESHOLD = 34
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 3
-SCALING_COOLDOWN_SECONDS = 20
+SCALING_COOLDOWN_SECONDS = 15
 MONITOR_INTERVAL_SECONDS = 2
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
 GPU_MEMORY_FREE_THRESHOLD_MB = 5000
@@ -150,7 +150,7 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
 # --- HAProxy Logic ---
 async def update_haproxy_config(active_servers: List[Dict]) -> bool:
     print("\nUpdating HAProxy configuration...")
-    server_lines = [f"    server web{i:02d} {s['host']}:{s['port']} maxconn 60\n" for i, s in enumerate(active_servers, start=1)]
+    server_lines = [f"    server web{i:02d} {s['host']}:{s['port']} maxconn 65\n" for i, s in enumerate(active_servers, start=1)]
     upstream_config = "".join(server_lines)
     try:
         with open(HAPROROXY_TEMPLATE_PATH, "r") as f: template = f.read()
