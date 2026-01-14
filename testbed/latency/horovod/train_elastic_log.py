@@ -206,7 +206,7 @@ def train(state):
         optimizer.step()
         # if hvd.rank() == 1 and idx == 0:
         #     logging.info("Backward pass.")
-        # end_batch = time.time()
+        end_batch = time.time()
 
         # if hvd.rank() == 1 and idx == 0:
         #     logging.info("First Batch done!.")
