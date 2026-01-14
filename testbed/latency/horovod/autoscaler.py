@@ -424,7 +424,7 @@ async def autoscaler_task():
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
 
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
-            print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Saturation: {saturation_ratio:.2f}")
+            print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} ")
             print(f"DTLS : {' | '.join(server_details)}")
 
             if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
