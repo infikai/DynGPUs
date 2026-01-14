@@ -150,7 +150,7 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
 # --- HAProxy Logic ---
 async def update_haproxy_config(active_servers: List[Dict]) -> bool:
     print("\nUpdating HAProxy configuration...")
-    server_lines = [f"    server web{i:02d} {s['host']}:{s['port']}\n" for i, s in enumerate(active_servers, start=1)]
+    server_lines = [f"    server web{i:02d} {s['host']}:{s['port']} maxconn 60\n" for i, s in enumerate(active_servers, start=1)]
     upstream_config = "".join(server_lines)
     try:
         with open(HAPROROXY_TEMPLATE_PATH, "r") as f: template = f.read()
