@@ -28,7 +28,7 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 15
+LOAD_HISTORY_SIZE = 12
 
 # --- Feedforward P-Controller Configuration ---
 BASE_TTFT_TARGET_SECONDS = 2
