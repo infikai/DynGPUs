@@ -419,7 +419,7 @@ async def autoscaler_task():
             smoothed_avg_load = np.mean(load_history)
 
             server_details = []
-            for server, metrics in zip(active_servers_for_metrics, metric_results):
+            for server, metrics in zip(active_servers, metric_results):
                 r, w = metrics.get('running', 0), metrics.get('waiting', 0)
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
 
