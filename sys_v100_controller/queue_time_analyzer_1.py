@@ -99,7 +99,7 @@ class BackgroundLoadManager:
 async def run_experiment(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     
-    concurrency_sweep = [0, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
+    concurrency_sweep = [0, 10, 20, 30, 40, 50, 55, 60, 65, 70, 80, 90]
     
     # --- NEW: Probe Lengths Configuration ---
     probe_lengths = [50, 500, 1000, 2000, 4000] 
