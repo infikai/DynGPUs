@@ -68,7 +68,7 @@ MAX_DYNAMIC_DOWN_THRESHOLD = 30
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
-    {"host": "10.10.3.3", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    # {"host": "10.10.3.3", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
     {"host": "10.10.3.3", "port": 8002, "status": "sleeping", "rank": 2, "shared": True},
     {"host": "10.10.3.3", "port": 8003, "status": "sleeping", "rank": 3, "shared": True},
 
