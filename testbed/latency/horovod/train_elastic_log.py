@@ -88,6 +88,7 @@ def train(state):
                             level=logging.INFO,
                             format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S')
+    last_log_time = time.time()
     # Log when train() is called, which happens initially and after a host update
     # if hvd.rank() == 1:
     #     logging.info('Train() has been called.')
