@@ -108,7 +108,7 @@ async def run_experiment(args):
     
     # Sweep concurrency to force waiting states
     # Adjusted: We likely need high concurrency to see 'waiting' requests if GPU is powerful
-    concurrency_sweep = [0, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
+    concurrency_sweep = [10, 20, 40, 50, 55, 60, 65, 70, 80, 90]
     
     # Use a fixed probe length to ensure TTFT variations are ONLY due to queueing
     PROBE_LEN = 1024 
