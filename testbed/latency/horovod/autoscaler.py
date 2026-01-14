@@ -418,7 +418,14 @@ async def autoscaler_task():
             if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
             smoothed_avg_load = np.mean(load_history)
 
-            print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers)} | Avg Load/Server: {avg_load_per_server:.2f}", end="")
+            server_details = []
+            for server, metrics in zip(active_servers_for_metrics, metric_results):
+                r, w = metrics.get('running', 0), metrics.get('waiting', 0)
+                server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
+
+            print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
+            print(f"LOAD : Inst: {instantaneous_avg_load:.2f} | Smooth: {smoothed_avg_load:.2f} | Saturation: {saturation_ratio:.2f}")
+            print(f"DTLS : {' | '.join(server_details)}")
 
             if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
 
