@@ -99,7 +99,7 @@ class BackgroundLoadManager:
 async def run_experiment(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     
-    concurrency_sweep = [0, 10, 20, 30, 40, 50, 55, 60, 65, 70, 80, 90]
+    concurrency_sweep = [10, 20, 40, 50, 55, 60, 65, 70, 80, 90]
     
     # --- NEW: Probe Lengths Configuration ---
     probe_lengths = [50, 500, 1000, 2000, 4000] 
@@ -179,7 +179,7 @@ async def run_experiment(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", type=str, default="http://localhost:8000/v1/completions")
-    parser.add_argument("--metrics-url", type=str, default="http://localhost:8002/metrics")
+    parser.add_argument("--metrics-url", type=str, default="http://localhost:8000/metrics")
     parser.add_argument("--model-path", type=str, required=True, help="Path to tokenizer")
     parser.add_argument("--probes", type=int, default=10, help="Probes per config") # Reduced default probes slightly to save time
     parser.add_argument("--warmup", type=int, default=8, help="Warmup seconds")
