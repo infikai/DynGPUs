@@ -147,7 +147,7 @@ async def run_experiment(args):
     
     # Background Noise Config
     bg_min_input = 500
-    bg_max_input = 2000
+    bg_max_input = 4000
     # ---------------------
 
     final_results = [] 
