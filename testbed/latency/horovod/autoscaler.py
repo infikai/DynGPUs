@@ -6,7 +6,7 @@ import numpy as np
 import asyncssh
 from typing import List, Dict
 
-# --- ⚙️ Configuration ---
+# ---  Configuration ---
 # File Paths
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg"  # The file to be overwritten
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template" # The template file
@@ -14,20 +14,21 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 HOROVOD_HOSTFILE_PATH = "./hostfile.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 30
-SCALE_UP_THRESHOLD = 40
+SCALE_DOWN_THRESHOLD = 20
+SCALE_UP_THRESHOLD = 34
 
 # Scaling Rules
-MIN_ACTIVE_SERVERS = 1
-SCALING_COOLDOWN_SECONDS = 20
+MIN_ACTIVE_SERVERS = 3
+SCALING_COOLDOWN_SECONDS = 30
 MONITOR_INTERVAL_SECONDS = 2
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 60
 GPU_MEMORY_FREE_THRESHOLD_MB = 3500
 GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
+LOAD_HISTORY_SIZE = 8
 
-# --- 🖥️ Server State Management ---
+# ---  Server State Management ---
 ALL_SERVERS = [
     # node1 (10.10.3.1)
     {"host": "10.10.3.1", "port": 8000, "status": "sleeping", "rank": 8, "shared": True},
@@ -400,6 +401,8 @@ async def autoscaler_task():
     """The main autoscaler loop that polls server metrics and triggers scaling."""
     print("🚀 Autoscaler started...")
     last_scaling_time = 0
+    load_history = []
+
     async with httpx.AsyncClient() as client:
         while True:
             await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
@@ -410,21 +413,36 @@ async def autoscaler_task():
             metric_results = await asyncio.gather(*metric_tasks)
 
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
-            avg_load_per_server = total_load / len(active_servers) if len(active_servers) > 0 else 0
+            instantaneous_avg_load = total_load / len(active_servers_for_metrics)
+            load_history.append(instantaneous_avg_load)
+            if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
+            smoothed_avg_load = np.mean(load_history)
 
             print(f"\r[{time.strftime('%H:%M:%S')}] Active: {len(active_servers)} | Avg Load/Server: {avg_load_per_server:.2f}", end="")
 
             if not ((time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS): continue
 
-            if avg_load_per_server < SCALE_DOWN_THRESHOLD and len(active_servers) > MIN_ACTIVE_SERVERS:
-                scale_factor = avg_load_per_server / SCALE_DOWN_THRESHOLD if SCALE_DOWN_THRESHOLD > 0 else 0
-                num_to_scale = max(1, int(len(active_servers) * (1 - scale_factor)))
-                if await scale_down(count=num_to_scale): last_scaling_time = time.time()
-            elif avg_load_per_server > SCALE_UP_THRESHOLD:
-                scale_factor = avg_load_per_server / SCALE_UP_THRESHOLD if SCALE_UP_THRESHOLD > 0 else 1
-                num_to_scale = max(1, int(len(active_servers) * (scale_factor - 1)))
-                if await scale_up(count=num_to_scale): last_scaling_time = time.time()
-
+            if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
+                if (smoothed_avg_load < current_down_threshold and 
+                    instantaneous_avg_load < current_down_threshold and 
+                    (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < current_up_threshold):
+                    
+                    deviation = (current_down_threshold - smoothed_avg_load) / current_down_threshold
+                    num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
+                    num_to_scale = min(num_to_scale, 2)
+                    print(f" (Scaling Down by {num_to_scale})")
+                    if await scale_down(count=num_to_scale): last_scaling_time = time.time()
+                
+                elif (smoothed_avg_load > current_up_threshold and 
+                      instantaneous_avg_load > current_up_threshold and 
+                      (total_load / (len(active_servers_for_metrics)+1)) > current_down_threshold):
+                    
+                    deviation = (smoothed_avg_load - current_up_threshold) / current_up_threshold
+                    num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
+                    num_to_scale = min(num_to_scale, 2)
+                    print(f" (Scaling Up by {num_to_scale})")
+                    if await scale_up(count=num_to_scale): last_scaling_time = time.time()
+                    
 # --- Main Execution ---
 
 if __name__ == "__main__":
