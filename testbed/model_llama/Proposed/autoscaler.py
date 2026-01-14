@@ -15,7 +15,7 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 25
+SCALE_DOWN_THRESHOLD = 20
 SCALE_UP_THRESHOLD = 40
 
 # Scaling Rules
@@ -28,7 +28,7 @@ GPU_FREE_TIMEOUT_SECONDS = 15
 GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- Unaggressive/Anticipatory Scaling Parameters ---
-LOAD_HISTORY_SIZE = 12
+LOAD_HISTORY_SIZE = 15
 
 # --- Feedforward P-Controller Configuration ---
 BASE_TTFT_TARGET_SECONDS = 2
