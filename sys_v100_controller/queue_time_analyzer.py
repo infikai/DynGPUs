@@ -42,7 +42,7 @@ async def get_vllm_metrics(session, metrics_url):
 # 2. BACKGROUND LOAD (Dynamic)
 # ==============================================================================
 class BackgroundLoadManager:
-    def __init__(self, session, url, tokenizer, min_input=500, max_input=2000):
+    def __init__(self, session, url, tokenizer, min_input=500, max_input=4000):
         self.session = session
         self.url = url
         self.tokenizer = tokenizer
