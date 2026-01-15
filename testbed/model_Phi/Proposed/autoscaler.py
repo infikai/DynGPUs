@@ -49,9 +49,9 @@ WAITING_THRESHOLD_CRITICAL = 5
 
 # Penalties (How much to lower the threshold)
 # 1. Growing Penalty: If queue increased since last check (e.g. 1 -> 3)
-QUEUE_GROWTH_PENALTY = 1.5 
+QUEUE_GROWTH_PENALTY = 1
 # 2. Critical Penalty: If queue is simply too large (> 5)
-QUEUE_CRITICAL_PENALTY = 2.5
+QUEUE_CRITICAL_PENALTY = 1.5
 
 # Triggers
 QUEUE_SATURATION_RATIO = 0.5
