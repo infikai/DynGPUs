@@ -247,54 +247,67 @@ async def benchmark(
     """Dispatches requests based on staged RPS, using content from the prepared trace requests."""
     
     all_tasks: List[asyncio.Task] = []
-    benchmark_start_time = time.perf_counter()
     request_iterator = iter(prepared_requests)
 
-    for stage_name, rps in stages.items():
-        print(f"\n--- Starting Stage: {stage_name} (RPS: {rps}) for {stage_duration}s ---")
-        stage_start_time = time.perf_counter()
-        
-        target_delay = 1.0 / rps if rps > 0 else float('inf')
-        total_requests_to_dispatch = int(rps * stage_duration)
-        
-        for i in range(total_requests_to_dispatch):
+    try:
+        for stage_name, rps in stages.items():
+            print(f"\n--- Starting Stage: {stage_name} (RPS: {rps}) for {stage_duration}s ---")
+            stage_start_time = time.perf_counter()
             
-            # --- Timing Control ---
-            elapsed = time.perf_counter() - stage_start_time
-            expected_next_dispatch_time = (i * target_delay)
-            time_to_wait = expected_next_dispatch_time - elapsed
-            if time_to_wait > 0:
-                await asyncio.sleep(time_to_wait)
+            target_delay = 1.0 / rps if rps > 0 else float('inf')
+            total_requests_to_dispatch = int(rps * stage_duration)
             
-            # --- Dispatch ---
-            try:
-                # Get the next prepared request from the iterator
-                request = next(request_iterator) 
-            except StopIteration:
-                print("Error: Iterator ran out of requests prematurely. Stopping benchmark.")
-                break # Break out of the stage loop
+            for i in range(total_requests_to_dispatch):
+                
+                # --- Timing Control ---
+                elapsed = time.perf_counter() - stage_start_time
+                expected_next_dispatch_time = (i * target_delay)
+                time_to_wait = expected_next_dispatch_time - elapsed
+                if time_to_wait > 0:
+                    await asyncio.sleep(time_to_wait)
+                
+                # --- Dispatch ---
+                try:
+                    request = next(request_iterator) 
+                except StopIteration:
+                    print("Error: Iterator ran out of requests prematurely. Stopping benchmark.")
+                    break 
 
-            # Create and append the task
-            task = asyncio.create_task(process_request(request, api_url, model_name))
-            all_tasks.append(task)
+                task = asyncio.create_task(process_request(request, api_url, model_name))
+                all_tasks.append(task)
+                
+            print(f"Stage {stage_name} dispatched {total_requests_to_dispatch} requests.")
             
-        print(f"Stage {stage_name} dispatched {total_requests_to_dispatch} requests.")
-        
-        # Wait for the stage duration to pass (allows remaining tasks to run in the background)
-        stage_runtime = time.perf_counter() - stage_start_time
-        time_to_wait_after_dispatch = stage_duration - stage_runtime
-        if time_to_wait_after_dispatch > 0:
-            await asyncio.sleep(time_to_wait_after_dispatch)
-        
-        if total_requests_to_dispatch > 0:
-            actual_stage_rps = total_requests_to_dispatch / stage_runtime
-            print(f"  Actual Dispatch RPS during stage: {actual_stage_rps:.2f}")
+            stage_runtime = time.perf_counter() - stage_start_time
+            time_to_wait_after_dispatch = stage_duration - stage_runtime
+            if time_to_wait_after_dispatch > 0:
+                await asyncio.sleep(time_to_wait_after_dispatch)
+            
+            if total_requests_to_dispatch > 0:
+                actual_stage_rps = total_requests_to_dispatch / stage_runtime
+                print(f"  Actual Dispatch RPS during stage: {actual_stage_rps:.2f}")
 
+        print("\nAll stages dispatched. Waiting for all requests to complete...")
+        results = await asyncio.gather(*all_tasks)
+        return results
 
-    print("\nAll stages dispatched. Waiting for all requests to complete...")
-    results = await asyncio.gather(*all_tasks)
-    
-    return results
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        print("\n\n!!! Benchmark Interrupted (Ctrl+C) !!!")
+        print("Gathering results from tasks that completed before interruption...")
+        
+        # Collect results only from tasks that are completely done
+        partial_results = []
+        for task in all_tasks:
+            if task.done() and not task.cancelled():
+                try:
+                    # Check if the task raised an exception internally
+                    if not task.exception():
+                        partial_results.append(task.result())
+                except Exception:
+                    pass
+        
+        print(f"Recovered {len(partial_results)} completed requests.")
+        return partial_results
 
 
 # --- Utilities (saving and metrics) ---
