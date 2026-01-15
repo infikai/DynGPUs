@@ -15,8 +15,8 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 22
-SCALE_UP_THRESHOLD = 38
+SCALE_DOWN_THRESHOLD = 28
+SCALE_UP_THRESHOLD = 45
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 3
