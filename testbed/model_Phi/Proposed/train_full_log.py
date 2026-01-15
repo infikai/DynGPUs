@@ -12,6 +12,7 @@ import socket
 from sampler import MyElasticSampler
 import argparse
 import logging # MODIFICATION: Import logging
+import gc
 
 # Hyperparameters
 EPOCHS = 90
