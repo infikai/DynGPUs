@@ -31,7 +31,7 @@ BENCHMARK_STAGES = {
     "Stage 15": 18,
     "Stage 16": 15,
     "Stage 17": 12,
-    "Stage 18": 10,
+    "Stage 18": 8,
     
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
