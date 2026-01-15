@@ -12,9 +12,9 @@ import numpy as np
 
 
 # --- Global Configuration ---
-STAGE_DURATION_SECONDS = 300  # 5 minutes per stage
+STAGE_DURATION_SECONDS = 500  # 5 minutes per stage
 BENCHMARK_STAGES = {
-    "Stage 1 (High Load)": 20,
+    "Stage 1 (High Load)": 2,
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
@@ -301,18 +301,26 @@ def save_results_to_file(results: List[RequestResult], filename: str):
 def calculate_metrics(
     results: List[RequestResult],
     duration: float,
+    summary_filename: str = "summary.txt"
 ):
-    """Calculates and prints performance metrics."""
+    """Calculates, prints, and saves performance metrics."""
+    
+    # Helper to print to console AND append to file buffer
+    summary_lines = []
+    def log(msg=""):
+        print(msg)
+        summary_lines.append(str(msg))
+
     completed_requests = sum(1 for r in results if r.success)
     total_output_tokens = sum(r.output_len for r in results if r.success)
 
-    print("\n" + "="*50)
-    print("=============== Benchmark Summary ================")
-    print("="*50)
-    print(f"Total benchmark time: {duration:.2f} s")
-    print(f"Total requests processed: {completed_requests} / {len(results)}")
-    print(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
-    print(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
+    log("="*50)
+    log("=============== Benchmark Summary ================")
+    log("="*50)
+    log(f"Total benchmark time: {duration:.2f} s")
+    log(f"Total requests processed: {completed_requests} / {len(results)}")
+    log(f"Throughput (requests/sec): {completed_requests / duration:.2f}")
+    log(f"Throughput (output tokens/sec): {total_output_tokens / duration:.2f}")
 
     # --- Metrics Per Stage ---
     stage_metrics = {}
@@ -322,8 +330,8 @@ def calculate_metrics(
         if res.success:
             stage_metrics[res.stage].append(res)
             
-    print("\n" + "="*50)
-    print("============ Stage-Specific Metrics =============")
+    log("\n" + "="*50)
+    log("============ Stage-Specific Metrics =============")
     
     for stage_name, stage_results in stage_metrics.items():
         if not stage_results: continue
@@ -334,10 +342,10 @@ def calculate_metrics(
         stage_completed = len(stage_results)
         stage_tokens = sum(r.output_len for r in stage_results)
 
-        print(f"\n--- {stage_name} (Target RPS: {BENCHMARK_STAGES.get(stage_name)}) ---")
-        print(f"  Requests Completed: {stage_completed}")
-        print(f"  Stage Throughput (RPS): {stage_completed / stage_duration:.2f}")
-        print(f"  Stage Throughput (Tokens/sec): {stage_tokens / stage_duration:.2f}")
+        log(f"\n--- {stage_name} (Target RPS: {BENCHMARK_STAGES.get(stage_name)}) ---")
+        log(f"  Requests Completed: {stage_completed}")
+        log(f"  Stage Throughput (RPS): {stage_completed / stage_duration:.2f}")
+        log(f"  Stage Throughput (Tokens/sec): {stage_tokens / stage_duration:.2f}")
 
 
     # --- Overall Latency Metrics ---
@@ -356,17 +364,26 @@ def calculate_metrics(
     def print_latency_stats(name, latencies_sec):
         if not latencies_sec: return
         latencies_ms = np.array(latencies_sec) * 1000
-        print(f"Mean {name} (ms):   {np.mean(latencies_ms):.2f}")
-        print(f"Median {name} (ms): {np.median(latencies_ms):.2f}")
-        print(f"P99 {name} (ms):    {np.percentile(latencies_ms, 99):.2f}")
+        log(f"Mean {name} (ms):   {np.mean(latencies_ms):.2f}")
+        log(f"Median {name} (ms): {np.median(latencies_ms):.2f}")
+        log(f"P99 {name} (ms):    {np.percentile(latencies_ms, 99):.2f}")
 
-    print("\n" + "-"*15 + "Time to First Token (Overall)" + "-"*15)
+    log("\n" + "-"*15 + "Time to First Token (Overall)" + "-"*15)
     print_latency_stats("TTFT", ttfts)
-    print("\n" + "-----Time per Output Token (Overall, excl. 1st token)------")
+    log("\n" + "-----Time per Output Token (Overall, excl. 1st token)------")
     print_latency_stats("TPOT", tpots)
-    print("\n" + "-"*15 + "Inter-token Latency (Overall)" + "-"*15)
+    log("\n" + "-"*15 + "Inter-token Latency (Overall)" + "-"*15)
     print_latency_stats("ITL", itls)
-    print("="*50)
+    log("="*50)
+    log("\n")
+
+    # Save summary to file
+    try:
+        with open(summary_filename, "w") as f:
+            f.write("\n".join(summary_lines))
+        print(f"\nSummary text saved to {summary_filename}")
+    except Exception as e:
+        print(f"\nError saving summary text file: {e}")
 
 
 # --- Main Execution ---
