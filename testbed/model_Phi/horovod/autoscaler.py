@@ -15,7 +15,7 @@ HOROVOD_HOSTFILE_PATH = "./hostfile.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
 SCALE_DOWN_THRESHOLD = 4.5
-SCALE_UP_THRESHOLD = 8.5
+SCALE_UP_THRESHOLD = 8.2
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 3
