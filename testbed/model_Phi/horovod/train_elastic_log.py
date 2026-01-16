@@ -112,7 +112,7 @@ def train(state):
             epoch = state.epoch
             logging.info(f'Status Update. Epoch: {epoch}, Processed Samples: {processed}')
             last_log_time = time.time()  # Reset the timer
-        print(f'Status Update. Epoch: {epoch}, Processed Samples: {processed}')
+        # print(f'Status Update. Epoch: {epoch}, Processed Samples: {processed}')
 
         start_batch = time.time()
         if idx == 0:
