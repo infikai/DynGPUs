@@ -14,18 +14,18 @@ import numpy as np
 # --- Global Configuration ---
 STAGE_DURATION_SECONDS = 200  # 5 minutes per stage
 BENCHMARK_STAGES = {
-    "Stage 1": 0.7,
+    "Stage 1": 0.65,
     "Stage 2": 1.2,
     "Stage 3": 2.4,
-    "Stage 4": 3.5,
-    "Stage 5": 4.7,
-    "Stage 6": 6,
+    "Stage 4": 3.6,
+    "Stage 5": 4.65,
+    "Stage 6": 6.5,
     "Stage 7": 5,
     "Stage 8": 4.3,
     "Stage 9": 3.8,
     "Stage 10": 4.35,
     "Stage 11": 4.85,
-    "Stage 12": 5.65,
+    "Stage 12": 6.3,
     "Stage 13": 4.2,
     "Stage 14": 3.8,
     "Stage 15": 4.4,
