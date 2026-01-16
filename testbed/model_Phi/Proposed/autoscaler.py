@@ -31,7 +31,7 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 LOAD_HISTORY_SIZE = 8
 
 # --- Feedforward P-Controller Configuration ---
-BASE_TTFT_TARGET_SECONDS = 0.8
+BASE_TTFT_TARGET_SECONDS = 3
 PREFILL_MS_PER_TOKEN = 0
 
 QUEUE_COST_MS_PER_REQUEST = 521.62 
@@ -378,6 +378,7 @@ async def autoscaler_task():
             # --- 5. COMBINE ADJUSTMENTS ---
             # We take the MAXIMUM of both adjustments to prioritize safety.
             # If Queue Watchdog screams "Drop by 5" and TTFT says "Raise by 2", we Drop by 5.
+            ttft_adjustment = 0.0
             final_adjustment = max(ttft_adjustment, queue_adjustment)
 
             new_up = SCALE_UP_THRESHOLD - final_adjustment
