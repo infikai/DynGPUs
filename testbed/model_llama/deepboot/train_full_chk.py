@@ -14,7 +14,7 @@ import argparse
 import logging # MODIFICATION: Import logging
 
 # Hyperparameters
-EPOCHS = 90
+EPOCHS = 9
 
 class TrainingState:
     def __init__(self):
