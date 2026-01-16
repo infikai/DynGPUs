@@ -6,7 +6,7 @@ import numpy as np
 import asyncssh
 from typing import List, Dict, Optional
 
-# --- ⚙️ Configuration ---
+# --- Configuration ---
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg"
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
@@ -27,12 +27,12 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 # vLLM Startup settings
 VLLM_STARTUP_DELAY_SECONDS = 25  # Fixed warm-up time
 
-# --- 🧠 DeepBoot / ATS-I Parameters ---
+# --- DeepBoot / ATS-I Parameters ---
 DEEPBOOT_PROTECT_MIN_SECONDS = 30
 DEEPBOOT_PROTECT_MAX_SECONDS = 120
 DEEPBOOT_PROTECT_INCREMENT = 15
 
-# --- 🖥️ Server State Management ---
+# --- Server State Management ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
     # {"host": "10.10.3.3", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
