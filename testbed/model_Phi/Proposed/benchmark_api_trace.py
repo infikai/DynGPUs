@@ -25,7 +25,7 @@ BENCHMARK_STAGES = {
     "Stage 9": 3.8,
     "Stage 10": 4.35,
     "Stage 11": 4.85,
-    "Stage 12": 6.3,
+    "Stage 12": 6.4,
     "Stage 13": 4.2,
     "Stage 14": 3.8,
     "Stage 15": 4.4,
