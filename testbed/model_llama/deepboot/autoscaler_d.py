@@ -35,18 +35,18 @@ DEEPBOOT_PROTECT_INCREMENT = 15
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
     # Dedicated inference-only servers (no rank)
-    {"host": "10.10.3.3", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
-    {"host": "10.10.3.3", "port": 8002, "status": "sleeping", "rank": 2, "shared": True},
-    {"host": "10.10.3.3", "port": 8003, "status": "sleeping", "rank": 3, "shared": True},
+    # {"host": "10.10.3.3", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    {"host": "10.10.3.3", "port": 8002, "status": "training", "rank": 2, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
+    {"host": "10.10.3.3", "port": 8003, "status": "training", "rank": 3, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
 
-    {"host": "10.10.3.2", "port": 8000, "status": "sleeping", "rank": 4, "shared": True},
-    {"host": "10.10.3.2", "port": 8001, "status": "sleeping", "rank": 5, "shared": True},
-    {"host": "10.10.3.2", "port": 8002, "status": "sleeping", "rank": 6, "shared": True},
-    {"host": "10.10.3.2", "port": 8003, "status": "sleeping", "rank": 7, "shared": True},
+    {"host": "10.10.3.2", "port": 8000, "status": "training", "rank": 4, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
+    {"host": "10.10.3.2", "port": 8001, "status": "training", "rank": 5, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
+    {"host": "10.10.3.2", "port": 8002, "status": "training", "rank": 6, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
+    {"host": "10.10.3.2", "port": 8003, "status": "training", "rank": 7, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
 
-    {"host": "10.10.3.1", "port": 8000, "status": "sleeping", "rank": 8, "shared": True},
-    {"host": "10.10.3.1", "port": 8001, "status": "sleeping", "rank": 9, "shared": True},
-    {"host": "10.10.3.1", "port": 8002, "status": "sleeping", "rank": 10, "shared": True},
+    {"host": "10.10.3.1", "port": 8000, "status": "training", "rank": 8, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
+    {"host": "10.10.3.1", "port": 8001, "status": "training", "rank": 9, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
+    {"host": "10.10.3.1", "port": 8002, "status": "training", "rank": 10, "shared": True, "protect_expiry": 0.0, "usage_counter": 0},
     {"host": "10.10.3.1", "port": 8003, "status": "active", "shared": False},
     # Shared servers that have a corresponding training rank
 ]
