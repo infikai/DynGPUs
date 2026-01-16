@@ -242,9 +242,10 @@ async def benchmark(
     model_name: str,
     stages: Dict[str, int],
     stage_duration: int,
-    prepared_requests: List[Request]
+    prepared_requests: List[Request],
+    results_accumulator: List[RequestResult]  # <--- New Argument
 ):
-    """Dispatches requests based on staged RPS, using content from the prepared trace requests."""
+    """Dispatches requests and saves completed results into results_accumulator."""
     
     all_tasks: List[asyncio.Task] = []
     request_iterator = iter(prepared_requests)
@@ -282,32 +283,30 @@ async def benchmark(
             time_to_wait_after_dispatch = stage_duration - stage_runtime
             if time_to_wait_after_dispatch > 0:
                 await asyncio.sleep(time_to_wait_after_dispatch)
-            
-            if total_requests_to_dispatch > 0:
-                actual_stage_rps = total_requests_to_dispatch / stage_runtime
-                print(f"  Actual Dispatch RPS during stage: {actual_stage_rps:.2f}")
 
         print("\nAll stages dispatched. Waiting for all requests to complete...")
-        results = await asyncio.gather(*all_tasks)
-        return results
+        # Wait for all tasks to finish normally
+        completed_results = await asyncio.gather(*all_tasks)
+        results_accumulator.extend(completed_results)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
         print("\n\n!!! Benchmark Interrupted (Ctrl+C) !!!")
         print("Gathering results from tasks that completed before interruption...")
         
-        # Collect results only from tasks that are completely done
-        partial_results = []
+        recovered_count = 0
         for task in all_tasks:
+            # We only want tasks that actually finished successfully or failed gracefully
             if task.done() and not task.cancelled():
                 try:
-                    # Check if the task raised an exception internally
                     if not task.exception():
-                        partial_results.append(task.result())
+                        results_accumulator.append(task.result())
+                        recovered_count += 1
                 except Exception:
                     pass
         
-        print(f"Recovered {len(partial_results)} completed requests.")
-        return partial_results
+        print(f"Recovered {recovered_count} completed requests.")
+        # We do NOT re-raise the exception here to allow cleanup, 
+        # but asyncio.run might still raise it in Main.
 
 
 # --- Utilities (saving and metrics) ---
@@ -463,15 +462,22 @@ if __name__ == "__main__":
     start_time = time.perf_counter()
     
     # 4. Run Benchmark
-    results = asyncio.run(
-        benchmark(
-            api_url=api_url,
-            model_name=args.model_name,
-            stages=BENCHMARK_STAGES,
-            stage_duration=STAGE_DURATION_SECONDS,
-            prepared_requests=prepared_requests
+    # We create the list HERE so it survives if asyncio.run crashes
+    results = [] 
+    
+    try:
+        asyncio.run(
+            benchmark(
+                api_url=api_url,
+                model_name=args.model_name,
+                stages=BENCHMARK_STAGES,
+                stage_duration=STAGE_DURATION_SECONDS,
+                prepared_requests=prepared_requests,
+                results_accumulator=results # <--- Pass the list in
+            )
         )
-    )
+    except KeyboardInterrupt:
+        print("\nMain script caught KeyboardInterrupt. Proceeding to save available data...")
     
     end_time = time.perf_counter()
     
