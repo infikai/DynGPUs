@@ -243,8 +243,13 @@ async def scale_up(count: int) -> bool:
             write_active_workers(orig_ranks)
             return False
 
+    try:
+        await asyncio.gather(*[set_server_sleep_state(s, sleep=False) for s in servers_to_wake])
+    except Exception as e:
+        print(f"Error during parallel wake: {e}")
+        # Depending on your logic, you might want to return False or handle partial success here
+        return False
     for server in servers_to_wake:
-        await set_server_sleep_state(server, sleep=False)
         server['status'] = 'active'
 
     if await update_haproxy_config([s for s in ALL_SERVERS if s['status'] == 'active']):
