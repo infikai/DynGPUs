@@ -14,15 +14,15 @@ import numpy as np
 # --- Global Configuration ---
 STAGE_DURATION_SECONDS = 200  # 5 minutes per stage
 BENCHMARK_STAGES = {
-    "Stage 1": 0.25,
-    "Stage 2": 0.4,
-    "Stage 3": 0.5,
-    "Stage 4": 0.3,
-    "Stage 5": 0.2,
-    "Stage 6": 0.45,
-    "Stage 7": 0.25,
-    "Stage 8": 0.4,
-    "Stage 9": 0.2,
+    "Stage 1": 0.35,
+    "Stage 2": 0.5,
+    "Stage 3": 0.6,
+    "Stage 4": 0.4,
+    "Stage 5": 0.3,
+    "Stage 6": 0.55,
+    "Stage 7": 0.35,
+    "Stage 8": 0.5,
+    "Stage 9": 0.3,
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
