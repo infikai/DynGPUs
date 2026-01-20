@@ -14,24 +14,15 @@ import numpy as np
 # --- Global Configuration ---
 STAGE_DURATION_SECONDS = 200  # 5 minutes per stage
 BENCHMARK_STAGES = {
-    "Stage 1": 0.5,
-    "Stage 2": 0.8,
-    "Stage 3": 1,
-    "Stage 4": 0.6,
-    "Stage 5": 0.4,
-    "Stage 6": 0.9,
-    "Stage 7": 0.5,
-    "Stage 8": 0.8,
-    "Stage 9": 0.4,
-    "Stage 10": 0.6,
-    "Stage 11": 0.9,
-    "Stage 12": 0.8,
-    "Stage 13": 0.4,
-    "Stage 14": 0.2,
-    "Stage 15": 0.5,
-    "Stage 16": 0.4,
-    "Stage 17": 0.9,
-    "Stage 18": 0.3,
+    "Stage 1": 0.25,
+    "Stage 2": 0.4,
+    "Stage 3": 0.5,
+    "Stage 4": 0.3,
+    "Stage 5": 0.2,
+    "Stage 6": 0.45,
+    "Stage 7": 0.25,
+    "Stage 8": 0.4,
+    "Stage 9": 0.2,
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
@@ -98,7 +89,11 @@ def load_trace_file(filepath: str) -> List[Request]:
 # --- Core Executor ---
 
 async def process_request(request: Request, api_url: str, model_name: str) -> RequestResult:
-    """Coroutine to send one HTTP request to the single API target."""
+    """
+    Coroutine to send one HTTP request. 
+    MODIFIED: Uses line-based iteration to correctly parse SSE (Server-Sent Events)
+    and match vLLM benchmark token counting behavior.
+    """
     
     result = RequestResult(request_id=request.request_id, success=False, output_len=0, stage=request.stage)
     
@@ -107,49 +102,70 @@ async def process_request(request: Request, api_url: str, model_name: str) -> Re
         "prompt": request.prompt,
         "max_tokens": request.output_len,
         "stream": True,
+        "ignore_eos": False, # vLLM bench often uses this, but strictly dependent on your use case
     }
     
     result.start_time = time.perf_counter()
     generated_tokens = 0
     
-    # Fresh connection/session for every request to ensure distinct traffic
+    # Fresh connection for every request to simulate real traffic conditions
     connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
+    
     timeout = aiohttp.ClientTimeout(
-        total=None, # No overall timeout limit
-        connect=None, # No connection timeout limit
-        sock_read=REQUEST_READ_TIMEOUT_SECONDS # Timeout between read chunks
+        total=None, 
+        connect=None, 
+        sock_read=REQUEST_READ_TIMEOUT_SECONDS
     )
     
     try:
         async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.DummyCookieJar()) as session:
-            # Explicitly set Connection: close header
             async with session.post(
                 url=api_url, 
                 json=payload, 
                 headers={"Connection": "close"},
-                timeout=timeout  # <--- HERE
+                timeout=timeout
             ) as response:
+                
                 if response.status != 200:
-                    print(f"Error: Request {request.request_id} failed with status {response.status} from {api_url}")
+                    print(f"Error: Request {request.request_id} failed with status {response.status}")
                     result.end_time = time.perf_counter()
                     return result
                 
-                first_token_received = False
-                async for chunk in response.content.iter_any():
-                    token_time = time.perf_counter()
-                    if not first_token_received:
-                        result.first_token_time = token_time
-                        first_token_received = True
-                    result.token_timestamps.append(token_time)
-                    if chunk.strip():
+                # Iterate over lines (SSE format) instead of arbitrary chunks
+                async for line in response.content:
+                    # Filter out keep-alive newlines
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
+                    # Parse Server-Sent Events (SSE)
+                    if line.startswith(b"data: "):
+                        data_str = line[6:] # Strip "data: " prefix
+                        
+                        # Check for stream end
+                        if data_str == b"[DONE]":
+                            continue
+                            
+                        # Mark First Token Time (TTFT)
+                        # We do this strictly on the first valid data chunk
+                        if generated_tokens == 0:
+                            result.first_token_time = time.perf_counter()
+                            
+                        # Track token timestamps
+                        result.token_timestamps.append(time.perf_counter())
                         generated_tokens += 1
 
         result.end_time = time.perf_counter()
+        
+        # If the request was successful but produced 0 tokens (rare), handle gracefully
+        if generated_tokens == 0:
+             result.first_token_time = result.end_time
+
         result.output_len = generated_tokens
         result.success = True
         
-    except aiohttp.ClientError as e:
-        # print(f"Error processing request {request.request_id} to {api_url}: {e}")
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        # print(f"Error processing request {request.request_id}: {e}")
         result.end_time = time.perf_counter()
     
     return result
