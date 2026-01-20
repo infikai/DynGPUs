@@ -11,7 +11,7 @@ from collections import deque
 HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg" 
 HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template"
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
-ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
+ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
