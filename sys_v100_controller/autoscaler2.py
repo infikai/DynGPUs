@@ -15,8 +15,8 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_controller.log"
 
 # Base Scaling Thresholds
-SCALE_DOWN_THRESHOLD = 4.5
-SCALE_UP_THRESHOLD = 7
+SCALE_DOWN_THRESHOLD = 3.9
+SCALE_UP_THRESHOLD = 6.5
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
@@ -67,6 +67,7 @@ MAX_DYNAMIC_DOWN_THRESHOLD = 30
 
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
+    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
     {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True},
 ]
