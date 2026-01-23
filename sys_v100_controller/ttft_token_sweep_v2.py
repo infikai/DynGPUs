@@ -142,7 +142,7 @@ async def run_experiment(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     
     # --- CONFIGURATION ---
-    concurrency_levels = [0, 5, 10, 20, 30, 40, 50, 60] # Add more as needed
+    concurrency_levels = [0, 30, 40, 50, 60, 80, 90, 100, 110] # Add more as needed
     token_lengths = [50, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000]     # Add more as needed
     
     # Background Noise Config
