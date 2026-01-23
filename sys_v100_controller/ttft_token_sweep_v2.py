@@ -27,7 +27,7 @@ class BackgroundLoadManager:
     """
     Maintains concurrency with DYNAMIC input lengths to simulate real traffic.
     """
-    def __init__(self, session, url, tokenizer, min_input=128, max_input=1024):
+    def __init__(self, session, url, tokenizer, min_input=200, max_input=4000):
         self.session = session
         self.url = url
         self.tokenizer = tokenizer
