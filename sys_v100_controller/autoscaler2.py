@@ -366,7 +366,8 @@ async def autoscaler_task():
             # --- 5. COMBINE ADJUSTMENTS ---
             # We take the MAXIMUM of both adjustments to prioritize safety.
             # If Queue Watchdog screams "Drop by 5" and TTFT says "Raise by 2", we Drop by 5.
-            final_adjustment = max(ttft_adjustment, queue_adjustment)
+            # final_adjustment = max(ttft_adjustment, queue_adjustment)
+            final_adjustment = 0
 
             new_up = SCALE_UP_THRESHOLD - final_adjustment
             new_down = SCALE_DOWN_THRESHOLD - final_adjustment
