@@ -33,19 +33,27 @@ class Scheduler:
     def _initialize_logs(self):
         self.training_log_file.write("job_id,arrival_time,start_time,delay,base_duration,ideal_completion_time,actual_completion_time,performance_factor,gpus\n")
         self.inference_delay_log_file.write("timestamp,average_delay_seconds,job_count\n")
-        self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,borrowed_inference_gpus\n")
+        # --- MODIFIED: Added gpus_in_protect column ---
+        self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,borrowed_inference_gpus,gpus_in_protect\n")
 
     def _log_gpu_usage(self):
         training_gpus_used = 0
         inference_gpus_used = 0
         borrowed_gpus_used = 0 
+        protect_gpus_count = 0 # --- NEW COUNTER ---
 
         for gpu in self.cluster.training_gpus:
             if not gpu.is_idle():
                 training_gpus_used += 1
 
         for gpu in self.cluster.inference_gpus:
+            # Count PROTECT specific
+            if gpu.state == 'PROTECT':
+                protect_gpus_count += 1
+
+            # General Usage Logic
             if gpu.is_llm_server:
+                # This counts both RUN and PROTECT as "Used" (Reserved)
                 inference_gpus_used += 1
             elif not gpu.is_idle():
                 inference_gpus_used += 1
@@ -55,7 +63,8 @@ class Scheduler:
                          inference_gpus_used -= 1
                          break
         
-        self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used}\n")
+        # --- MODIFIED: Log the new metric ---
+        self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used},{protect_gpus_count}\n")
     
     def _dispatch_job(self, job):
         if job.job_type == 'training':
@@ -250,21 +259,15 @@ class Scheduler:
             self.training_log_file.write(log_entry)
 
         # === DeepBoot Protection Logic ===
-        # If an inference job finished on an inference GPU:
         if job.job_type in ['inference', 'llm_inference']:
             for gpu in freed_gpus:
                 if gpu.gpu_type == 'inference':
-                    # Only enter PROTECT if NO other tasks are running (completely empty)
                     if len(gpu.running_tasks) == 0:
                         gpu.state = 'PROTECT'
-                        # Calculate time using the formula in components.py
                         gpu.protect_time_remaining = gpu.calculate_protection_time()
-                        # print(f"🔒 GPU {gpu.gpu_id} entering PROTECT for {gpu.protect_time_remaining}s")
                     else:
-                        # If tasks remain (e.g., stacked inference), stay in RUN
                         gpu.state = 'RUN'
         
-        # If a training job finished on a borrowed GPU, it goes straight to FREE
         if job.job_type == 'training':
             for gpu in freed_gpus:
                 if gpu.gpu_type == 'inference':
@@ -313,7 +316,6 @@ class Scheduler:
             self.clock.tick()
             
             # 1. Update Lifecycle (PROTECT -> FREE)
-            # This was missing in the previous turn
             for gpu in self.cluster.inference_gpus:
                 gpu.update_lifecycle(self.clock.tick_duration)
 
