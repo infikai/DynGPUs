@@ -8,73 +8,57 @@ class ClusterManager:
         self.inference_gpus = [GPU(f"I_{i}", 'inference') for i in range(num_inference_gpus)]
         print(f"ClusterManager initialized: {num_training_gpus} Training GPUs, {num_inference_gpus} Inference GPUs.")
 
-    # --- ATS-I: Inference Selection Helpers ---
+    def find_resources_for_llm_batch(self, num_jobs_needed):
+        """
+        Finds available resources for an LLM batch.
+        Returns a tuple: (list_of_usable_gpus, empty_list)
+        """
+        available_gpus = [] 
+        
+        # 1. Get all existing LLM servers
+        active_server_gpus = [gpu for gpu in self.inference_gpus if gpu.is_llm_server]
+        available_gpus.extend(active_server_gpus)
 
-    def find_warm_inference_gpu(self):
+        # 2. Get all convertible idle GPUs
+        convertible_gpus = [gpu for gpu in self.inference_gpus if not gpu.is_llm_server and gpu.is_idle()]
+        available_gpus.extend(convertible_gpus)
+
+        return available_gpus, []
+
+    def find_gpu_for_llm_job(self):
         """
-        Priority 1: Find a GPU ready for LLM inference.
-        Sub-priority A: A GPU in 'RUN' state with available slots (Stacking).
-        Sub-priority B: A GPU in 'PROTECT' state (Empty but warm).
+        Finds a single GPU for an LLM job.
+        Priority: Existing LLM server > Idle Convertible GPU.
         """
-        # A. Check for Stacking (Best Utilization)
+        # 1. Prioritize existing LLM servers with free slots
         for gpu in self.inference_gpus:
-            if gpu.state == 'RUN' and len(gpu.running_tasks) < LLM_MAX_CONCURRENCY:
+            if gpu.is_llm_server and gpu.llm_slots_available > 0:
                 return gpu
         
-        # B. Check for Warm Idle (Protection Pool)
-        candidates = [g for g in self.inference_gpus if g.state == 'PROTECT']
-        if candidates:
-            # Sort by usage_count desc (g.cnt)
-            candidates.sort(key=lambda x: x.usage_count, reverse=True)
-            return candidates[0]
-            
+        # 2. If none found, find an idle regular GPU to convert
+        for gpu in self.inference_gpus:
+            if not gpu.is_llm_server and gpu.is_idle():
+                return gpu
+                
         return None
 
-    def find_free_inference_gpu(self):
-        """Priority 2: Find FREE GPU (Cold Start)."""
-        for gpu in self.inference_gpus:
-            if gpu.state == 'FREE':
+    def find_gpu_for_stackable_inference(self, job):
+        """Finds a single GPU that can fit a small inference job."""
+        for gpu in sorted(self.inference_gpus, key=lambda g: g.is_idle()):
+            if gpu.state == 'FREE' and gpu.can_fit(job):
                 return gpu
         return None
 
-    def find_reclaim_target(self):
-        """Priority 3: Find a LOANED GPU (TRAIN state) to preempt."""
-        best_gpu = None
-        min_loss = float('inf')
+    def find_idle_gpus_in_inference_pool(self, count):
+        """Finds a specific number of idle GPUs from the entire inference pool."""
+        idle_gpus = [gpu for gpu in self.inference_gpus if gpu.is_idle()]
+        if len(idle_gpus) >= count:
+            return idle_gpus[:count]
+        return []
 
-        # Only look at GPUs currently loaned to training
-        loaned_gpus = [g for g in self.inference_gpus if g.state == 'TRAIN']
-
-        for gpu in loaned_gpus:
-            if not gpu.running_tasks: continue
-            
-            job = list(gpu.running_tasks.values())[0]['job']
-            current_gpus = len(job.assigned_gpus)
-            
-            # Don't kill the last GPU of a training job if we can avoid it
-            if current_gpus <= 1:
-                loss = float('inf')
-            else:
-                curr_speed = job.calculate_speedup(current_gpus)
-                next_speed = job.calculate_speedup(current_gpus - 1)
-                loss = curr_speed - next_speed
-            
-            if loss < min_loss:
-                min_loss = loss
-                best_gpu = gpu
-                
-        return best_gpu
-
-    # --- Training Selection Helpers ---
-
-    def find_idle_training_gpus(self, count):
-        """Finds idle dedicated training GPUs."""
-        idle = []
-        for gpu in self.training_gpus:
-            if not gpu.running_tasks:
-                idle.append(gpu)
-                if len(idle) == count: break
-        return idle
+    def find_idle_gpus_for_training(self, count):
+        idle_gpus = [gpu for gpu in self.training_gpus if gpu.is_idle()]
+        return idle_gpus[:count] if len(idle_gpus) >= count else []
 
     def find_loanable_inference_gpus(self, count):
         """Finds 'count' inference GPUs that are strictly FREE."""
@@ -84,3 +68,7 @@ class ClusterManager:
                 loanable.append(gpu)
                 if len(loanable) == count: break
         return loanable
+
+    def release_resources_for_job(self, job):
+        for gpu in job.assigned_gpus:
+            gpu.release_task(job)

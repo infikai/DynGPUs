@@ -41,19 +41,16 @@ class GPU:
         self.gpu_id = gpu_id
         self.gpu_type = gpu_type      # 'training' or 'inference'
         
-        # DeepBoot Lifecycle State
-        # 'FREE': Idle, available for loaning
-        # 'RUN': Running inference (1 to 16 jobs)
-        # 'PROTECT': Reserved for inference (warm, 0 jobs)
-        # 'TRAIN': Loaned to a training job (Exclusive)
         self.state = 'FREE' 
         self.protect_time_remaining = 0
-        
-        # Track usage for dynamic protection formula
         self.usage_count = 0  
         
         self.total_memory = GPU_MEMORY_GB
+        self.total_utilization = GPU_UTILIZATION_PERCENT
+        
+        # Initialize available resources
         self.available_memory = self.total_memory
+        self.available_utilization = self.total_utilization
         
         self.running_tasks = {}
 
@@ -63,7 +60,6 @@ class GPU:
             self.protect_time_remaining -= tick_duration
             if self.protect_time_remaining <= 0:
                 self.state = 'FREE'
-                # Reset count on expiry
                 self.usage_count = 0 
     
     def is_idle(self):
@@ -123,6 +119,11 @@ class GPU:
             if job.job_type == 'training':
                 self.available_memory += job.memory_required
     
+    # Support for stackable inference checks
+    def can_fit(self, job):
+        return (job.memory_required <= self.available_memory and
+                job.utilization_required <= self.available_utilization)
+
     def __repr__(self):
         return f"<GPU {self.gpu_id} ({self.gpu_type}) State={self.state} Tasks={len(self.running_tasks)}>"
 
@@ -138,7 +139,7 @@ class Job:
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         
-        # If it's an LLM job and base_duration wasn't provided, calculate it
+        # Calculate duration for LLM jobs if not provided
         if self.job_type == 'llm_inference' and base_duration == 0:
             self.base_duration = (LLM_BASE_TTFT + 
                                   (LLM_TKN_PER_INPUT * input_tokens) + 
@@ -154,14 +155,12 @@ class Job:
         self.start_time = -1
         self.completion_time = -1
         self.turnaround_time = -1
-        self.gpus_needed = 1  # Default, updated by scheduler
+        self.gpus_needed = 1  
         
-        # Overhead tracking
         self.overhead_remaining = 0.0
 
     def assign_resources(self, gpus, current_time):
         self.assigned_gpus = gpus
-        # Only set start_time if it hasn't been set (first assignment)
         if self.start_time == -1:
             self.start_time = current_time
 
@@ -170,7 +169,6 @@ class Job:
         return num_gpus ** 0.8
 
     def update_progress(self, time_delta, current_time):
-        """Updates progress, prioritizing overhead consumption first."""
         if not self.assigned_gpus:
             return
 
