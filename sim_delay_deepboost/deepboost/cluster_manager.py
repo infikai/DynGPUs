@@ -42,6 +42,38 @@ class ClusterManager:
                 
         return None
 
+    def find_reclaim_target(self):
+        """
+        Priority 3: Find a LOANED GPU (TRAIN state) to preempt.
+        DeepBoot: "minimize the reduction of metrics... when reclaiming."
+        """
+        best_gpu = None
+        min_loss = float('inf')
+
+        # Only look at GPUs currently loaned to training
+        loaned_gpus = [g for g in self.inference_gpus if g.state == 'TRAIN']
+
+        for gpu in loaned_gpus:
+            if not gpu.running_tasks: continue
+            
+            job = list(gpu.running_tasks.values())[0]['job']
+            current_gpus = len(job.assigned_gpus)
+            
+            # Don't kill the last GPU of a training job if we can avoid it
+            if current_gpus <= 1:
+                loss = float('inf')
+            else:
+                # Loss = Current Speedup - Future Speedup
+                curr_speed = job.calculate_speedup(current_gpus)
+                next_speed = job.calculate_speedup(current_gpus - 1)
+                loss = curr_speed - next_speed
+            
+            if loss < min_loss:
+                min_loss = loss
+                best_gpu = gpu
+                
+        return best_gpu
+
     def find_gpu_for_stackable_inference(self, job):
         """Finds a single GPU that can fit a small inference job."""
         for gpu in sorted(self.inference_gpus, key=lambda g: g.is_idle()):

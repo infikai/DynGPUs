@@ -3,7 +3,8 @@
 import math
 from collections import deque
 from components import (SimulationClock, Job, GPU, GPU_MEMORY_GB, GPU_UTILIZATION_PERCENT, 
-                        LLM_MAX_CONCURRENCY)
+                        LLM_MAX_CONCURRENCY, OVERHEAD_WARM_START, OVERHEAD_COLD_START, 
+                        OVERHEAD_RECLAIM, OVERHEAD_AFE_SYNC)
 
 class Scheduler:
     def __init__(self, jobs_list, cluster_manager, progress_interval, log_interval, start_time, end_time, tick_duration):
@@ -33,27 +34,23 @@ class Scheduler:
     def _initialize_logs(self):
         self.training_log_file.write("job_id,arrival_time,start_time,delay,base_duration,ideal_completion_time,actual_completion_time,performance_factor,gpus\n")
         self.inference_delay_log_file.write("timestamp,average_delay_seconds,job_count\n")
-        # --- MODIFIED: Added gpus_in_protect column ---
         self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,borrowed_inference_gpus,gpus_in_protect\n")
 
     def _log_gpu_usage(self):
         training_gpus_used = 0
         inference_gpus_used = 0
         borrowed_gpus_used = 0 
-        protect_gpus_count = 0 # --- NEW COUNTER ---
+        protect_gpus_count = 0 
 
         for gpu in self.cluster.training_gpus:
             if not gpu.is_idle():
                 training_gpus_used += 1
 
         for gpu in self.cluster.inference_gpus:
-            # Count PROTECT specific
             if gpu.state == 'PROTECT':
                 protect_gpus_count += 1
 
-            # General Usage Logic
             if gpu.is_llm_server:
-                # This counts both RUN and PROTECT as "Used" (Reserved)
                 inference_gpus_used += 1
             elif not gpu.is_idle():
                 inference_gpus_used += 1
@@ -63,7 +60,6 @@ class Scheduler:
                          inference_gpus_used -= 1
                          break
         
-        # --- MODIFIED: Log the new metric ---
         self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used},{protect_gpus_count}\n")
     
     def _dispatch_job(self, job):
@@ -106,6 +102,16 @@ class Scheduler:
                 job.start_time = self.clock.current_time
                 job.assigned_gpus = [gpu]
                 
+                # Assign Warm Start overhead (or cold if converted, managed inside loop)
+                # Simplified: Batch implies availability, using standard warm/cold assumption
+                # For more precision, we check state. But overhead is tracked in Job init usually 
+                # or here.
+                # Adding overhead here:
+                if gpu.state == 'FREE':
+                    job.overhead_remaining = OVERHEAD_COLD_START
+                else:
+                    job.overhead_remaining = OVERHEAD_WARM_START
+
                 delay = math.floor(max(0, job.start_time - job.arrival_time))
                 if delay > 0:
                     self.current_inference_delays.append(delay)
@@ -119,21 +125,71 @@ class Scheduler:
         return llm_jobs[assigned_count:]
 
     def _dispatch_llm_inference_job(self, job):
+        """
+        DeepBoot: 
+        1. Warm Start (PROTECT/RUN)
+        2. Cold Start (FREE)
+        3. Reclaim (TRAIN -> Preempt)
+        """
+        # 1. Warm / Cold (Find GPU Logic)
         gpu = self.cluster.find_gpu_for_llm_job()
+        
         if gpu:
+            # Determine overhead based on state BEFORE assignment
+            if gpu.state == 'FREE':
+                job.overhead_remaining = OVERHEAD_COLD_START
+                gpu.convert_to_llm_server()
+            else:
+                job.overhead_remaining = OVERHEAD_WARM_START
+                if gpu.state == 'PROTECT':
+                    gpu.usage_count += 1
+
             job.assigned_gpus = [gpu]
             job.start_time = self.clock.current_time
             
             delay = max(0, job.start_time - job.arrival_time)
             self.current_inference_delays.append(delay)
             
-            if not gpu.is_llm_server:
-                gpu.convert_to_llm_server()
-            
             gpu.assign_llm_task(job)
             self.running_jobs.append(job)
             return True
+        
+        # 3. Reclaim (DeepBoot Preemption)
+        gpu = self.cluster.find_reclaim_target()
+        if gpu:
+            # Preempt the training job
+            if gpu.running_tasks:
+                training_job = list(gpu.running_tasks.values())[0]['job']
+                self._preempt_training_job(training_job, gpu)
+
+            # Assign to Inference Job
+            job.overhead_remaining = OVERHEAD_RECLAIM
+            job.assigned_gpus = [gpu]
+            job.start_time = self.clock.current_time
+            
+            delay = max(0, job.start_time - job.arrival_time)
+            self.current_inference_delays.append(delay)
+            
+            gpu.convert_to_llm_server()
+            gpu.assign_llm_task(job)
+            self.running_jobs.append(job)
+            return True
+
         return False
+
+    def _preempt_training_job(self, job, gpu):
+        """
+        AFE Logic: Release GPU, Shrink Job, Apply Sync Penalty.
+        """
+        gpu.release_task(job)
+        if gpu in job.assigned_gpus:
+            job.assigned_gpus.remove(gpu)
+        
+        # Apply AFE Sync Penalty to the training job
+        job.overhead_remaining += OVERHEAD_AFE_SYNC
+        
+        # Log or track if necessary
+        # print(f"📉 Job {job.id} preempted from GPU {gpu.gpu_id}")
 
     def _dispatch_inference_job(self, job):
         is_large_job = (job.memory_required > GPU_MEMORY_GB or 
