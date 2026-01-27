@@ -85,6 +85,7 @@ class Scheduler:
             return []
 
         num_jobs_to_assign = len(llm_jobs)
+        # Get the list of *GPUs* we can use, sorted by priority
         available_gpus, _ = self.cluster.find_resources_for_llm_batch(num_jobs_to_assign)
         
         assigned_count = 0
@@ -160,8 +161,10 @@ class Scheduler:
         gpu = self.cluster.find_gpu_for_stackable_inference(job)
         if gpu:
             job.assign_resources([gpu], self.clock.current_time)
+            
             delay = max(0, job.start_time - job.arrival_time)
             self.current_inference_delays.append(delay)
+            
             self.running_jobs.append(job)
             return True
         return False
@@ -177,10 +180,13 @@ class Scheduler:
         
         if len(allocated_gpus) == gpus_needed:
             job.assign_resources(allocated_gpus, self.clock.current_time)
+            
             delay = max(0, job.start_time - job.arrival_time)
             self.current_inference_delays.append(delay)
+            
             self.running_jobs.append(job)
             return True
+            
         return False
         
     def _dispatch_training_job(self, job):
@@ -188,12 +194,11 @@ class Scheduler:
         Schedules a training job using a Greedy approach with Borrowing.
         The job can start with fewer than desired GPUs if at least 1 is available.
         """
-        # 1. Calculate ideal resources needed
+        # 1. Calculate ideal resources needed based on actual requirements
         desired_gpus = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
                            math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
-        # We clamp specific logic: usually training wants 4, but let's stick to calculation or 4
-        if desired_gpus < 4 and job.memory_required > 1: # Heuristic: if it's a "real" training job
-            desired_gpus = 4
+        
+        # --- (MODIFIED: Removed default 4 GPU clamping) ---
         
         job.gpus_needed = desired_gpus
         min_gpus = 1 # Can start with 1
@@ -238,8 +243,8 @@ class Scheduler:
         for job in self.running_jobs:
             if job.job_type == 'training':
                 current_count = len(job.assigned_gpus)
-                # Desired is stored in gpus_needed, or default to 4 if not set correctly
-                desired = getattr(job, 'gpus_needed', 4) 
+                # --- (MODIFIED: Use job.gpus_needed without default assumption) ---
+                desired = getattr(job, 'gpus_needed', 1) 
                 
                 if current_count < desired:
                     needed = desired - current_count
@@ -258,17 +263,13 @@ class Scheduler:
                         for gpu in self.cluster.inference_gpus:
                             if gpu.is_idle():
                                 newly_acquired.append(gpu)
-                                if len(newly_acquired) >= remaining_need: # Correction: append to accumulated list
+                                if len(newly_acquired) >= remaining_need: 
                                     break
-                        # Fix logic: we have 'newly_acquired' mixing both pools. 
-                        # We stop if the total found equals needed.
                         if len(newly_acquired) > needed:
                             newly_acquired = newly_acquired[:needed]
 
                     # 3. Apply Scaling
                     if newly_acquired:
-                        # We must re-assign the job to re-distribute memory/load.
-                        # Since assign_resources clears current usage, we must:
                         # a. Release current
                         old_gpus = list(job.assigned_gpus)
                         for gpu in old_gpus:
@@ -283,11 +284,8 @@ class Scheduler:
                                 gpu.state = 'TRAIN'
                                 gpu.protect_time_remaining = 0
                         
-                        # d. Re-assign with ORIGINAL start time (preserve queue metrics)
+                        # d. Re-assign with ORIGINAL start time
                         job.assign_resources(all_gpus, job.start_time)
-                        
-                        # Optional: Log the scaling event
-                        # print(f"📈 Clock {self.clock.current_time}: Job {job.id} scaled up from {current_count} to {len(all_gpus)} GPUs.")
 
     def _handle_job_completion(self, job):
         """Processes a finished job, logs training data, and handles LLM scale-down."""
