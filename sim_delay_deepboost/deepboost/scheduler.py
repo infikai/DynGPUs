@@ -71,7 +71,6 @@ class Scheduler:
             return []
 
         num_jobs_to_assign = len(llm_jobs)
-        # This call was failing previously; now fixed in cluster_manager.py
         available_gpus, _ = self.cluster.find_resources_for_llm_batch(num_jobs_to_assign)
         
         assigned_count = 0
@@ -239,11 +238,9 @@ class Scheduler:
         self.running_jobs.remove(job)
         self.completed_jobs.append(job)
 
-        delay = 0
-        if job.start_time > job.arrival_time:
-             delay = job.start_time - job.arrival_time
-
+        # Logging Training Jobs
         if job.job_type == 'training':
+            delay = max(0, job.start_time - job.arrival_time)
             ideal_completion_time = job.arrival_time + job.base_duration
             actual_duration = job.completion_time - job.arrival_time
             perf_factor = actual_duration / job.base_duration if job.base_duration > 0 else 0
@@ -252,11 +249,27 @@ class Scheduler:
                          f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{len(freed_gpus)}\n")
             self.training_log_file.write(log_entry)
 
-        if job.job_type == 'llm_inference':
+        # === DeepBoot Protection Logic ===
+        # If an inference job finished on an inference GPU:
+        if job.job_type in ['inference', 'llm_inference']:
             for gpu in freed_gpus:
-                if gpu.is_llm_server and not gpu.running_tasks:
-                    print(f"庁 Clock {self.clock.current_time}: Reverting empty LLM server {gpu.gpu_id} to regular GPU.")
-                    gpu.revert_from_llm_server()
+                if gpu.gpu_type == 'inference':
+                    # Only enter PROTECT if NO other tasks are running (completely empty)
+                    if len(gpu.running_tasks) == 0:
+                        gpu.state = 'PROTECT'
+                        # Calculate time using the formula in components.py
+                        gpu.protect_time_remaining = gpu.calculate_protection_time()
+                        # print(f"🔒 GPU {gpu.gpu_id} entering PROTECT for {gpu.protect_time_remaining}s")
+                    else:
+                        # If tasks remain (e.g., stacked inference), stay in RUN
+                        gpu.state = 'RUN'
+        
+        # If a training job finished on a borrowed GPU, it goes straight to FREE
+        if job.job_type == 'training':
+            for gpu in freed_gpus:
+                if gpu.gpu_type == 'inference':
+                    gpu.state = 'FREE'
+                    gpu.usage_count = 0
     
     def _log_average_inference_delay(self):
         if not self.current_inference_delays:
@@ -281,7 +294,6 @@ class Scheduler:
             effective_start_time = self.pending_jobs[0].arrival_time
             print(f"Fast-forwarding to time {effective_start_time}.")
 
-        # Fast forward pending jobs
         while self.pending_jobs and self.pending_jobs[0].arrival_time < effective_start_time:
              self.pending_jobs.popleft()
         
@@ -299,6 +311,13 @@ class Scheduler:
                 break
             
             self.clock.tick()
+            
+            # 1. Update Lifecycle (PROTECT -> FREE)
+            # This was missing in the previous turn
+            for gpu in self.cluster.inference_gpus:
+                gpu.update_lifecycle(self.clock.tick_duration)
+
+            # 2. Elastic Scaling
             self._try_scale_up_training_jobs()
 
             if self.clock.current_time >= self.next_delay_log_time:
