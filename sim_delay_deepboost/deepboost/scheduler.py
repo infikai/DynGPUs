@@ -14,6 +14,10 @@ class Scheduler:
         self.cluster = cluster_manager
         self.clock = SimulationClock(tick_duration=tick_duration)
 
+        # Queue for GPUs currently initializing (Scaling Up)
+        # Format: {'job': job_obj, 'new_gpus': [gpu_list], 'time_left': seconds}
+        self.pending_scaling_events = []
+
         # Intervals
         self.progress_interval = progress_interval
         self.log_interval = log_interval
@@ -53,7 +57,6 @@ class Scheduler:
             if gpu.is_llm_server:
                 inference_gpus_used += 1
             elif not gpu.is_idle():
-                # It's busy. Check if it's doing training or inference.
                 inference_gpus_used += 1
                 for task in gpu.running_tasks.values():
                     if task['job'].job_type == 'training':
@@ -182,10 +185,7 @@ class Scheduler:
             job.assign_resources([gpu], self.clock.current_time)
             delay = max(0, job.start_time - job.arrival_time)
             self.current_inference_delays.append(delay)
-            
-            # --- FIX: Explicitly assign task to GPU ---
             gpu.assign_task(job)
-            
             self.running_jobs.append(job)
             return True
         return False
@@ -201,11 +201,8 @@ class Scheduler:
             job.assign_resources(allocated_gpus, self.clock.current_time)
             delay = max(0, job.start_time - job.arrival_time)
             self.current_inference_delays.append(delay)
-            
-            # --- FIX: Explicitly assign task to GPUs ---
             for gpu in allocated_gpus:
                 gpu.assign_task(job)
-                
             self.running_jobs.append(job)
             return True
         return False
@@ -235,8 +232,6 @@ class Scheduler:
         
         if len(assigned_gpus) >= min_gpus:
             job.assign_resources(assigned_gpus, self.clock.current_time)
-            
-            # --- FIX: Explicitly assign task to GPUs ---
             for gpu in assigned_gpus:
                 if gpu.gpu_type == 'inference':
                     gpu.state = 'TRAIN'
@@ -248,8 +243,18 @@ class Scheduler:
         return False
 
     def _try_scale_up_training_jobs(self):
+        """
+        Scans training jobs. If more GPUs are desired and found, they are 
+        placed into a 'pre-initialization' queue.
+        """
         for job in self.running_jobs:
             if job.job_type == 'training':
+                
+                # Skip if this job is already scaling up (waiting for init)
+                is_already_scaling = any(evt['job'] == job for evt in self.pending_scaling_events)
+                if is_already_scaling:
+                    continue
+
                 current_count = len(job.assigned_gpus)
                 desired = getattr(job, 'gpus_needed', 1) 
                 
@@ -257,11 +262,13 @@ class Scheduler:
                     needed = desired - current_count
                     newly_acquired = []
 
+                    # 1. Look for Idle Dedicated GPUs
                     for gpu in self.cluster.training_gpus:
                         if gpu.is_idle():
                             newly_acquired.append(gpu)
                             if len(newly_acquired) == needed: break
                     
+                    # 2. Look for Idle Inference GPUs
                     if len(newly_acquired) < needed:
                         remaining = needed - len(newly_acquired)
                         for gpu in self.cluster.inference_gpus:
@@ -272,21 +279,81 @@ class Scheduler:
                             newly_acquired = newly_acquired[:needed]
 
                     if newly_acquired:
-                        old_gpus = list(job.assigned_gpus)
-                        # Release from old
-                        for gpu in old_gpus: gpu.release_task(job)
-                        
-                        all_gpus = old_gpus + newly_acquired
-                        job.assign_resources(all_gpus, job.start_time)
-                        
-                        # --- FIX: Re-assign to ALL GPUs (old + new) ---
-                        for gpu in all_gpus:
-                            if gpu.gpu_type == 'inference':
+                        # Mark them as busy immediately so no one else takes them
+                        for gpu in newly_acquired:
+                             if gpu.gpu_type == 'inference':
                                 gpu.state = 'TRAIN'
                                 gpu.protect_time_remaining = 0
-                            gpu.assign_task(job)
+                             # Note: We do NOT call assign_task() yet. 
+                             # They are effectively "reserved" because state != FREE.
+
+                        # Determine Pre-Init Time
+                        if desired > 16:
+                            init_time = 140
+                        else:
+                            init_time = 40
+                        
+                        # Queue the scaling event
+                        self.pending_scaling_events.append({
+                            'job': job,
+                            'new_gpus': newly_acquired,
+                            'time_left': init_time
+                        })
+
+    def _process_scaling_events(self):
+        """
+        Decrements timers for initializing GPUs. When initialized, merges them.
+        """
+        # Iterate over a copy so we can remove items
+        for event in list(self.pending_scaling_events):
+            event['time_left'] -= self.clock.tick_duration
+            
+            if event['time_left'] <= 0:
+                # Initialization Complete -> Merge
+                job = event['job']
+                new_gpus = event['new_gpus']
+                
+                if job not in self.running_jobs:
+                    # Job finished/died while waiting. Release new GPUs.
+                    for gpu in new_gpus:
+                        if gpu.gpu_type == 'inference':
+                            gpu.state = 'FREE'
+                    self.pending_scaling_events.remove(event)
+                    continue
+
+                # Perform the merge
+                old_gpus = list(job.assigned_gpus)
+                
+                # 1. Release old tasks (resets internal counters)
+                for gpu in old_gpus: 
+                    gpu.release_task(job)
+                
+                # 2. Combine and Re-assign
+                all_gpus = old_gpus + new_gpus
+                job.assign_resources(all_gpus, job.start_time)
+                
+                for gpu in all_gpus:
+                    if gpu.gpu_type == 'inference':
+                        gpu.state = 'TRAIN'
+                    gpu.assign_task(job)
+                
+                # 3. Apply Sync Penalty
+                job.overhead_remaining += OVERHEAD_AFE_SYNC
+                
+                # Remove event
+                self.pending_scaling_events.remove(event)
 
     def _handle_job_completion(self, job):
+        # Cleanup any pending scaling events for this job
+        for event in list(self.pending_scaling_events):
+            if event['job'] == job:
+                # Release the reserved GPUs
+                for gpu in event['new_gpus']:
+                    if gpu.gpu_type == 'inference':
+                        gpu.state = 'FREE'
+                        gpu.usage_count = 0
+                self.pending_scaling_events.remove(event)
+
         freed_gpus = list(job.assigned_gpus)
         self.cluster.release_resources_for_job(job) 
         job.record_completion(self.clock.current_time)
@@ -362,7 +429,11 @@ class Scheduler:
             for gpu in self.cluster.inference_gpus:
                 gpu.update_lifecycle(self.clock.tick_duration)
 
+            # 1. Check for scaling opportunities
             self._try_scale_up_training_jobs()
+            
+            # 2. Advance scaling timers
+            self._process_scaling_events()
 
             if self.clock.current_time >= self.next_delay_log_time:
                 self._log_average_inference_delay()
