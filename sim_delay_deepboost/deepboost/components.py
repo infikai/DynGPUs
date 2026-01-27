@@ -47,6 +47,9 @@ class GPU:
         self.usage_count = 0  
         
         self.total_memory = GPU_MEMORY_GB
+        # --- FIX: Initialize available_memory ---
+        self.available_memory = self.total_memory
+        
         self.running_tasks = {}
 
     def update_lifecycle(self, tick_duration):
