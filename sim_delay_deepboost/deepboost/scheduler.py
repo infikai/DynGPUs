@@ -53,6 +53,7 @@ class Scheduler:
             if gpu.is_llm_server:
                 inference_gpus_used += 1
             elif not gpu.is_idle():
+                # It's busy. Check if it's doing training or inference.
                 inference_gpus_used += 1
                 for task in gpu.running_tasks.values():
                     if task['job'].job_type == 'training':
@@ -102,11 +103,6 @@ class Scheduler:
                 job.start_time = self.clock.current_time
                 job.assigned_gpus = [gpu]
                 
-                # Assign Warm Start overhead (or cold if converted, managed inside loop)
-                # Simplified: Batch implies availability, using standard warm/cold assumption
-                # For more precision, we check state. But overhead is tracked in Job init usually 
-                # or here.
-                # Adding overhead here:
                 if gpu.state == 'FREE':
                     job.overhead_remaining = OVERHEAD_COLD_START
                 else:
@@ -125,17 +121,9 @@ class Scheduler:
         return llm_jobs[assigned_count:]
 
     def _dispatch_llm_inference_job(self, job):
-        """
-        DeepBoot: 
-        1. Warm Start (PROTECT/RUN)
-        2. Cold Start (FREE)
-        3. Reclaim (TRAIN -> Preempt)
-        """
-        # 1. Warm / Cold (Find GPU Logic)
         gpu = self.cluster.find_gpu_for_llm_job()
         
         if gpu:
-            # Determine overhead based on state BEFORE assignment
             if gpu.state == 'FREE':
                 job.overhead_remaining = OVERHEAD_COLD_START
                 gpu.convert_to_llm_server()
@@ -154,15 +142,12 @@ class Scheduler:
             self.running_jobs.append(job)
             return True
         
-        # 3. Reclaim (DeepBoot Preemption)
         gpu = self.cluster.find_reclaim_target()
         if gpu:
-            # Preempt the training job
             if gpu.running_tasks:
                 training_job = list(gpu.running_tasks.values())[0]['job']
                 self._preempt_training_job(training_job, gpu)
 
-            # Assign to Inference Job
             job.overhead_remaining = OVERHEAD_RECLAIM
             job.assigned_gpus = [gpu]
             job.start_time = self.clock.current_time
@@ -178,18 +163,10 @@ class Scheduler:
         return False
 
     def _preempt_training_job(self, job, gpu):
-        """
-        AFE Logic: Release GPU, Shrink Job, Apply Sync Penalty.
-        """
         gpu.release_task(job)
         if gpu in job.assigned_gpus:
             job.assigned_gpus.remove(gpu)
-        
-        # Apply AFE Sync Penalty to the training job
         job.overhead_remaining += OVERHEAD_AFE_SYNC
-        
-        # Log or track if necessary
-        # print(f"📉 Job {job.id} preempted from GPU {gpu.gpu_id}")
 
     def _dispatch_inference_job(self, job):
         is_large_job = (job.memory_required > GPU_MEMORY_GB or 
@@ -205,6 +182,10 @@ class Scheduler:
             job.assign_resources([gpu], self.clock.current_time)
             delay = max(0, job.start_time - job.arrival_time)
             self.current_inference_delays.append(delay)
+            
+            # --- FIX: Explicitly assign task to GPU ---
+            gpu.assign_task(job)
+            
             self.running_jobs.append(job)
             return True
         return False
@@ -220,12 +201,16 @@ class Scheduler:
             job.assign_resources(allocated_gpus, self.clock.current_time)
             delay = max(0, job.start_time - job.arrival_time)
             self.current_inference_delays.append(delay)
+            
+            # --- FIX: Explicitly assign task to GPUs ---
+            for gpu in allocated_gpus:
+                gpu.assign_task(job)
+                
             self.running_jobs.append(job)
             return True
         return False
         
     def _dispatch_training_job(self, job):
-        # 1. Calculate ideal resources needed
         desired_gpus = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
                            math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
         job.gpus_needed = desired_gpus
@@ -233,14 +218,14 @@ class Scheduler:
 
         assigned_gpus = []
 
-        # 2. Priority 1: Dedicated Training GPUs
+        # Priority 1: Dedicated Training GPUs
         for gpu in self.cluster.training_gpus:
             if gpu.is_idle():
                 assigned_gpus.append(gpu)
                 if len(assigned_gpus) == desired_gpus:
                     break
         
-        # 3. Priority 2: Borrow from Inference Pool
+        # Priority 2: Borrow from Inference Pool
         if len(assigned_gpus) < desired_gpus:
             for gpu in self.cluster.inference_gpus:
                 if gpu.is_idle():
@@ -248,14 +233,16 @@ class Scheduler:
                     if len(assigned_gpus) == desired_gpus:
                         break
         
-        # 4. Dispatch if MINIMUM requirement met
         if len(assigned_gpus) >= min_gpus:
+            job.assign_resources(assigned_gpus, self.clock.current_time)
+            
+            # --- FIX: Explicitly assign task to GPUs ---
             for gpu in assigned_gpus:
                 if gpu.gpu_type == 'inference':
                     gpu.state = 'TRAIN'
                     gpu.protect_time_remaining = 0
-
-            job.assign_resources(assigned_gpus, self.clock.current_time)
+                gpu.assign_task(job)
+                
             self.running_jobs.append(job)
             return True
         return False
@@ -286,15 +273,18 @@ class Scheduler:
 
                     if newly_acquired:
                         old_gpus = list(job.assigned_gpus)
+                        # Release from old
                         for gpu in old_gpus: gpu.release_task(job)
                         
                         all_gpus = old_gpus + newly_acquired
-                        for gpu in newly_acquired:
-                             if gpu.gpu_type == 'inference':
+                        job.assign_resources(all_gpus, job.start_time)
+                        
+                        # --- FIX: Re-assign to ALL GPUs (old + new) ---
+                        for gpu in all_gpus:
+                            if gpu.gpu_type == 'inference':
                                 gpu.state = 'TRAIN'
                                 gpu.protect_time_remaining = 0
-                        
-                        job.assign_resources(all_gpus, job.start_time)
+                            gpu.assign_task(job)
 
     def _handle_job_completion(self, job):
         freed_gpus = list(job.assigned_gpus)
@@ -303,7 +293,6 @@ class Scheduler:
         self.running_jobs.remove(job)
         self.completed_jobs.append(job)
 
-        # Logging Training Jobs
         if job.job_type == 'training':
             delay = max(0, job.start_time - job.arrival_time)
             ideal_completion_time = job.arrival_time + job.base_duration
@@ -314,7 +303,6 @@ class Scheduler:
                          f"{ideal_completion_time},{job.completion_time},{perf_factor:.4f},{len(freed_gpus)}\n")
             self.training_log_file.write(log_entry)
 
-        # === DeepBoot Protection Logic ===
         if job.job_type in ['inference', 'llm_inference']:
             for gpu in freed_gpus:
                 if gpu.gpu_type == 'inference':
@@ -371,11 +359,9 @@ class Scheduler:
             
             self.clock.tick()
             
-            # 1. Update Lifecycle (PROTECT -> FREE)
             for gpu in self.cluster.inference_gpus:
                 gpu.update_lifecycle(self.clock.tick_duration)
 
-            # 2. Elastic Scaling
             self._try_scale_up_training_jobs()
 
             if self.clock.current_time >= self.next_delay_log_time:
