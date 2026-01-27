@@ -166,7 +166,8 @@ class Job:
 
     def calculate_speedup(self, num_gpus):
         if num_gpus <= 0: return 0.0
-        return num_gpus ** 1
+        # Linear scaling as requested
+        return num_gpus ** 1.0
 
     def update_progress(self, time_delta, current_time):
         if not self.assigned_gpus:
