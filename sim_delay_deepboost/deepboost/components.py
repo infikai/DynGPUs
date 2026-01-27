@@ -7,7 +7,8 @@ import math
 # ==========================================
 
 GPU_MEMORY_GB = 32
-LLM_MAX_CONCURRENCY = 16  # Max LLM slots per GPU
+GPU_UTILIZATION_PERCENT = 100  # <--- Added missing constant
+LLM_MAX_CONCURRENCY = 16       # Max LLM slots per GPU
 
 # DeepBoot Overhead Constants
 OVERHEAD_COLD_START = 2.5       # Time to load model on FREE GPU
@@ -47,7 +48,7 @@ class GPU:
         self.usage_count = 0  
         
         self.total_memory = GPU_MEMORY_GB
-        # --- FIX: Initialize available_memory ---
+        # Initialize available_memory to avoid AttributeErrors
         self.available_memory = self.total_memory
         
         self.running_tasks = {}
@@ -60,6 +61,42 @@ class GPU:
                 self.state = 'FREE'
                 # Reset count on expiry
                 self.usage_count = 0 
+    
+    def is_idle(self):
+        """Helper to check if GPU is free for tasks."""
+        # A GPU is idle if it has no tasks AND isn't in a reserved state like PROTECT/TRAIN
+        # unless we are looking for specific types of idle. 
+        # For general 'FREE' checks:
+        return self.state == 'FREE' and not self.running_tasks
+    
+    # Helper for LLM Server check (used by scheduler)
+    @property
+    def is_llm_server(self):
+        # In DeepBoot, any inference GPU in 'RUN' or 'PROTECT' is effectively a server
+        return self.state in ['RUN', 'PROTECT']
+    
+    @property
+    def llm_slots_available(self):
+        if self.state == 'RUN':
+            return LLM_MAX_CONCURRENCY - len(self.running_tasks)
+        elif self.state == 'PROTECT':
+            return LLM_MAX_CONCURRENCY
+        return 0
+
+    def convert_to_llm_server(self):
+        """Transitions FREE -> RUN/PROTECT context. Returns True if successful."""
+        if self.state == 'FREE':
+            self.state = 'RUN' # or PROTECT depending on immediate use
+            return True
+        return False
+        
+    def revert_from_llm_server(self):
+        """Transitions PROTECT -> FREE."""
+        if self.state == 'PROTECT':
+            self.state = 'FREE'
+            self.usage_count = 0
+            return True
+        return False
 
     def calculate_protection_time(self):
         """DeepBoot Formula: t_p = t_p,min + g.cnt * interval"""
@@ -76,6 +113,10 @@ class GPU:
         else:
             self.state = 'TRAIN'
             self.available_memory -= job.memory_required
+
+    def assign_llm_task(self, job):
+        """Specific helper for LLM tasks to match scheduler calls."""
+        self.assign_task(job)
 
     def release_task(self, job):
         if job.id in self.running_tasks:
@@ -97,6 +138,7 @@ class Job:
         self.base_duration = base_duration
         self.remaining_work = base_duration
         self.memory_required = max(memory_required, 1)
+        self.utilization_required = max(utilization_required, 1)
         
         self.assigned_gpus = []
         self.start_time = -1
@@ -105,6 +147,12 @@ class Job:
         
         # Overhead tracking
         self.overhead_remaining = 0.0
+
+    def assign_resources(self, gpus, current_time):
+        self.assigned_gpus = gpus
+        # Only set start_time if it hasn't been set (first assignment)
+        if self.start_time == -1:
+            self.start_time = current_time
 
     def calculate_speedup(self, num_gpus):
         if num_gpus <= 0: return 0.0
