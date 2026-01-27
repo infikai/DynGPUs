@@ -7,8 +7,13 @@ import math
 # ==========================================
 
 GPU_MEMORY_GB = 32
-GPU_UTILIZATION_PERCENT = 100  # <--- Added missing constant
+GPU_UTILIZATION_PERCENT = 100
 LLM_MAX_CONCURRENCY = 16       # Max LLM slots per GPU
+
+# LLM Performance Model Constants
+LLM_BASE_TTFT = 2.5          # Base time to first token
+LLM_TKN_PER_INPUT = 0.005    # Time per input token
+LLM_TPOT = 0.1               # Time per output token
 
 # DeepBoot Overhead Constants
 OVERHEAD_COLD_START = 2.5       # Time to load model on FREE GPU
@@ -48,7 +53,6 @@ class GPU:
         self.usage_count = 0  
         
         self.total_memory = GPU_MEMORY_GB
-        # Initialize available_memory to avoid AttributeErrors
         self.available_memory = self.total_memory
         
         self.running_tasks = {}
@@ -64,15 +68,10 @@ class GPU:
     
     def is_idle(self):
         """Helper to check if GPU is free for tasks."""
-        # A GPU is idle if it has no tasks AND isn't in a reserved state like PROTECT/TRAIN
-        # unless we are looking for specific types of idle. 
-        # For general 'FREE' checks:
         return self.state == 'FREE' and not self.running_tasks
     
-    # Helper for LLM Server check (used by scheduler)
     @property
     def is_llm_server(self):
-        # In DeepBoot, any inference GPU in 'RUN' or 'PROTECT' is effectively a server
         return self.state in ['RUN', 'PROTECT']
     
     @property
@@ -84,9 +83,9 @@ class GPU:
         return 0
 
     def convert_to_llm_server(self):
-        """Transitions FREE -> RUN/PROTECT context. Returns True if successful."""
+        """Transitions FREE -> RUN/PROTECT context."""
         if self.state == 'FREE':
-            self.state = 'RUN' # or PROTECT depending on immediate use
+            self.state = 'RUN' 
             return True
         return False
         
@@ -115,7 +114,6 @@ class GPU:
             self.available_memory -= job.memory_required
 
     def assign_llm_task(self, job):
-        """Specific helper for LLM tasks to match scheduler calls."""
         self.assign_task(job)
 
     def release_task(self, job):
@@ -131,12 +129,24 @@ class GPU:
 
 class Job:
     def __init__(self, id, job_type, arrival_time, base_duration=0, 
-                 memory_required=1, utilization_required=1):
+                 memory_required=1, utilization_required=1,
+                 input_tokens=0, output_tokens=0):
         self.id = id
         self.job_type = job_type  # 'training', 'inference', 'llm_inference'
         self.arrival_time = arrival_time
-        self.base_duration = base_duration
-        self.remaining_work = base_duration
+        
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        
+        # If it's an LLM job and base_duration wasn't provided, calculate it
+        if self.job_type == 'llm_inference' and base_duration == 0:
+            self.base_duration = (LLM_BASE_TTFT + 
+                                  (LLM_TKN_PER_INPUT * input_tokens) + 
+                                  (LLM_TPOT * output_tokens))
+        else:
+            self.base_duration = base_duration
+
+        self.remaining_work = self.base_duration
         self.memory_required = max(memory_required, 1)
         self.utilization_required = max(utilization_required, 1)
         
@@ -144,6 +154,7 @@ class Job:
         self.start_time = -1
         self.completion_time = -1
         self.turnaround_time = -1
+        self.gpus_needed = 1  # Default, updated by scheduler
         
         # Overhead tracking
         self.overhead_remaining = 0.0
