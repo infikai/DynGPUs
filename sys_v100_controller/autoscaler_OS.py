@@ -29,10 +29,10 @@ MAX_SLO_VIOLATION_RATIO = 0.12    # > 8% slow? Lower threshold.
 SAFE_SLO_VIOLATION_RATIO = 0.05   # < 2% slow? Raise threshold.
 
 # Threshold tuning
-INITIAL_UP_THRESHOLD = 25.0
+INITIAL_UP_THRESHOLD = 24.0
 MIN_UP_THRESHOLD = 3.0
 MAX_UP_THRESHOLD = 50.0
-THRESHOLD_STEP_SIZE = 1.0         
+THRESHOLD_STEP_SIZE = 1.5         
 DOWN_THRESHOLD_RATIO = 0.5
 
 # Standard Autoscaling Rules
