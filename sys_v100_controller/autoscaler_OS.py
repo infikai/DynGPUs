@@ -15,40 +15,35 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_adaptive_window.log"
 
 # --- 🎯 SLO & Adaptive Logic Configuration ---
-TTFT_SLO_TARGET_SECONDS = 6.8 
+TTFT_SLO_TARGET_SECONDS = 2.0 
 
-# Adaptive Window Logic
-ADAPTIVE_WINDOW_SECONDS = 60      
-MIN_WINDOW_DURATION_FOR_DECISION = 15 
+# --- 🔒 ONE-SHOT TUNING CONFIGURATION ---
+TUNING_MODE_DURATION_SECONDS = 80
+ADAPTIVE_WINDOW_SECONDS = 80      
+MIN_WINDOW_DURATION_FOR_DECISION = 30 
 
-# Percentile Targets
-MAX_SLO_VIOLATION_RATIO = 0.08
-SAFE_SLO_VIOLATION_RATIO = 0.02
+# Percentile Targets (UPDATED)
+MAX_SLO_VIOLATION_RATIO = 0.08    # > 8% slow? Lower threshold.
+SAFE_SLO_VIOLATION_RATIO = 0.02   # < 2% slow? Raise threshold.
 
 # Threshold tuning
 INITIAL_UP_THRESHOLD = 20.0
 MIN_UP_THRESHOLD = 3.0
 MAX_UP_THRESHOLD = 50.0
-THRESHOLD_STEP_SIZE = 1.0
+THRESHOLD_STEP_SIZE = 0.5 
 DOWN_THRESHOLD_RATIO = 0.6
 
 # "Old" Server Definition
-WARMUP_GRACE_PERIOD_SECONDS = 20 
+WARMUP_GRACE_PERIOD_SECONDS = 20
 
 # Standard Autoscaling Rules
 MIN_ACTIVE_SERVERS = 1
 SCALING_COOLDOWN_SECONDS = 15
 
-# --- ⏱️ DUAL INTERVAL CONFIGURATION ---
-# 1. TTFT Interval: Very fast to catch spikes/outliers.
+# --- ⏱️ INTERVAL CONFIGURATION ---
 TTFT_MONITOR_INTERVAL_SECONDS = 0.5
-
-# 2. Load Interval: Slower to ensure stability and smooth out noise.
 LOAD_MONITOR_INTERVAL_SECONDS = 2.0
-
-# Load Smoothing Window: 
-# 8 samples * 2.0 seconds = 8 second effective smoothing window.
-LOAD_HISTORY_SIZE = 8
+LOAD_HISTORY_SIZE = 4
 
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
 GPU_MEMORY_FREE_THRESHOLD_MB = 3000
@@ -250,17 +245,19 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started (Dual Interval Logic)...")
-    print(f"ℹ️  Intervals: TTFT every {TTFT_MONITOR_INTERVAL_SECONDS}s | Load every {LOAD_MONITOR_INTERVAL_SECONDS}s")
-    print(f"ℹ️  Load Smoothing: Last {LOAD_HISTORY_SIZE} samples (Approx {LOAD_HISTORY_SIZE*LOAD_MONITOR_INTERVAL_SECONDS}s window)")
+    print(f"🚀 Autoscaler started (One-Shot Tuning: 80s Window)...")
+    print(f"ℹ️  Tuning Phase: {TUNING_MODE_DURATION_SECONDS}s. Adjustment happens ONCE at the end of this phase.")
+    print(f"ℹ️  Sampling: TTFT={TTFT_MONITOR_INTERVAL_SECONDS}s | Load={LOAD_MONITOR_INTERVAL_SECONDS}s")
 
-    last_scaling_time = 0
+    last_scaling_time = time.time()
     last_load_check_time = 0
     
+    # State flags for the One-Shot logic
+    tuning_event_completed = False 
+
     load_history = []
-    smoothed_avg_load = 0.0 # Store globally for reporting
+    smoothed_avg_load = 0.0 
     
-    # Adaptive Logic State
     current_up_threshold = INITIAL_UP_THRESHOLD
     current_down_threshold = current_up_threshold * DOWN_THRESHOLD_RATIO
     
@@ -274,21 +271,16 @@ async def autoscaler_task():
 
     async with httpx.AsyncClient() as client:
         while True:
-            # Main Loop runs at High Frequency (TTFT Speed)
+            # --- 1. FAST LOOP (TTFT Data Collection) ---
             await asyncio.sleep(TTFT_MONITOR_INTERVAL_SECONDS)
             current_time = time.time()
 
             active_servers_for_metrics = [s for s in ALL_SERVERS if s['status'] == 'active']
             if not active_servers_for_metrics: continue 
 
-            # --- ALWAYS FETCH METRICS (To support fast TTFT) ---
             metric_tasks = [get_server_metrics(server, client) for server in active_servers_for_metrics]
             metric_results = await asyncio.gather(*metric_tasks)
 
-            # ---------------------------------------------------------
-            # PATH A: FAST PATH (TTFT Monitoring & Threshold Adjustment)
-            # ---------------------------------------------------------
-            new_samples_count = 0
             for server, current_m in zip(active_servers_for_metrics, metric_results):
                 srv_key = f"{server['host']}:{server['port']}"
                 prev_m = previous_server_metrics.get(srv_key, {'ttft_sum': 0, 'ttft_count': 0})
@@ -304,61 +296,86 @@ async def autoscaler_task():
                 if delta_count > 0 and (current_time - server['active_since']) > WARMUP_GRACE_PERIOD_SECONDS:
                     instant_ttft = delta_sum / delta_count
                     ttft_window.append((current_time, instant_ttft))
-                    new_samples_count += 1
             
-            # Prune Window
+            # Prune Window (Max 80s)
             while ttft_window and (current_time - ttft_window[0][0]) > ADAPTIVE_WINDOW_SECONDS:
                 ttft_window.popleft()
 
-            # Adaptive Logic
-            adjustment = 0.0
-            violation_ratio = 0.0
-            window_duration = 0.0
-            if ttft_window:
-                window_duration = ttft_window[-1][0] - ttft_window[0][0]
-                if window_duration >= MIN_WINDOW_DURATION_FOR_DECISION:
-                    all_values = [v for t, v in ttft_window]
-                    violation_count = sum(1 for v in all_values if v > TTFT_SLO_TARGET_SECONDS)
-                    violation_ratio = violation_count / len(all_values)
-
-                    if violation_ratio > MAX_SLO_VIOLATION_RATIO:
-                        adjustment = -THRESHOLD_STEP_SIZE 
-                    elif violation_ratio < SAFE_SLO_VIOLATION_RATIO:
-                        adjustment = THRESHOLD_STEP_SIZE
-                    
-                    new_up = current_up_threshold + adjustment
-                    current_up_threshold = max(MIN_UP_THRESHOLD, min(MAX_UP_THRESHOLD, new_up))
-                    current_down_threshold = current_up_threshold * DOWN_THRESHOLD_RATIO
-
-                    if adjustment != 0:
-                         try:
-                            with open(TTFT_LOG_FILE, "a") as f: 
-                                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}, ADJUST, {adjustment}, {current_up_threshold}, {window_duration:.1f}, {violation_ratio:.2f}\n")
-                         except: pass
-
-            # ---------------------------------------------------------
-            # PATH B: SLOW PATH (Load Calculation & Scaling Decisions)
-            # ---------------------------------------------------------
+            
+            # --- 2. SLOW LOOP (One-Shot Adjustment & Load Logic) ---
             if (current_time - last_load_check_time) >= LOAD_MONITOR_INTERVAL_SECONDS:
                 last_load_check_time = current_time
                 
-                # 1. Update Load History
+                # --- A. CHECK FOR ONE-SHOT TUNING TRIGGER ---
+                time_since_scale = current_time - last_scaling_time
+                window_duration = 0.0
+                adjustment = 0.0
+                violation_ratio = 0.0
+                
+                # Trigger logic: 
+                # 1. Tuning time (80s) has elapsed.
+                # 2. We haven't adjusted yet (tuning_event_completed is False).
+                # 3. We have some samples in window.
+                if time_since_scale >= TUNING_MODE_DURATION_SECONDS and not tuning_event_completed:
+                    if ttft_window:
+                        window_duration = ttft_window[-1][0] - ttft_window[0][0]
+                        
+                        if window_duration >= MIN_WINDOW_DURATION_FOR_DECISION:
+                            all_values = [v for t, v in ttft_window]
+                            violation_count = sum(1 for v in all_values if v > TTFT_SLO_TARGET_SECONDS)
+                            violation_ratio = violation_count / len(all_values)
+
+                            if violation_ratio > MAX_SLO_VIOLATION_RATIO:
+                                adjustment = -THRESHOLD_STEP_SIZE 
+                            elif violation_ratio < SAFE_SLO_VIOLATION_RATIO:
+                                adjustment = THRESHOLD_STEP_SIZE
+                            
+                            new_up = current_up_threshold + adjustment
+                            current_up_threshold = max(MIN_UP_THRESHOLD, min(MAX_UP_THRESHOLD, new_up))
+                            current_down_threshold = current_up_threshold * DOWN_THRESHOLD_RATIO
+
+                            print(f"\n🎯 ONE-SHOT TUNING TRIGGERED!")
+                            print(f"   Window: {window_duration:.1f}s | Samples: {len(all_values)} | Violation: {violation_ratio*100:.1f}%")
+                            print(f"   Adjustment: {adjustment} -> New Threshold: {current_up_threshold}\n")
+                            
+                            if adjustment != 0:
+                                try:
+                                    with open(TTFT_LOG_FILE, "a") as f: 
+                                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}, ONESHOT_ADJUST, {adjustment}, {current_up_threshold}, {window_duration:.1f}, {violation_ratio:.2f}\n")
+                                except: pass
+                        else:
+                            print(f"⚠️ Tuning time ended, but insufficient data duration ({window_duration:.1f}s). Skipping adjustment.")
+                    else:
+                        print(f"⚠️ Tuning time ended, but no data collected. Skipping adjustment.")
+
+                    # Mark done regardless of whether we actually changed value
+                    tuning_event_completed = True 
+
+
+                # --- B. STANDARD LOAD LOGIC ---
                 total_load = sum(r['running'] + r['waiting'] for r in metric_results)
                 instantaneous_avg_load = total_load / len(active_servers_for_metrics)
                 load_history.append(instantaneous_avg_load)
                 if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
                 smoothed_avg_load = np.mean(load_history)
-
-                # 2. Report to Console (On slow tick)
-                status_color = "🔴" if violation_ratio > MAX_SLO_VIOLATION_RATIO else "🟢"
-                window_status = f"{len(ttft_window)} samples ({window_duration:.1f}s)"
-                if window_duration < MIN_WINDOW_DURATION_FOR_DECISION: window_status += " [BUILDING]"
                 
-                print(f"[{time.strftime('%H:%M:%S')}] LOAD:{smoothed_avg_load:.1f} | Window: {window_status}")
-                if ttft_window:
-                    print(f"   ↳ Violation: {violation_ratio*100:.1f}% {status_color} (Thresh: {current_up_threshold:.1f})")
+                # --- NEW: DETAILED PER-SERVER LOAD REPORTING ---
+                server_details = []
+                for srv, metrics in zip(active_servers_for_metrics, metric_results):
+                    # Show load as integer (Run + Wait)
+                    load_val = metrics['running'] + metrics['waiting']
+                    server_details.append(f"[{srv['port']}]:{load_val:.0f}")
 
-                # 3. Scaling Decision
+                # Report Status
+                if not tuning_event_completed:
+                    remaining = int(TUNING_MODE_DURATION_SECONDS - time_since_scale)
+                    print(f"[{time.strftime('%H:%M:%S')}] LOAD:{smoothed_avg_load:.1f} | ⏳ COLLECTING DATA: {remaining}s remaining")
+                else:
+                    print(f"[{time.strftime('%H:%M:%S')}] LOAD:{smoothed_avg_load:.1f} | 🔒 THRESHOLD LOCKED: {current_up_threshold:.1f}")
+                
+                print(f"   ↳ INSTANT: {' '.join(server_details)}")
+
+                # --- C. SCALING DECISION ---
                 if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                     did_scale = False
                     
@@ -380,11 +397,12 @@ async def autoscaler_task():
                         print(f" (Scaling Up by {num_to_scale})")
                         if await scale_up(count=num_to_scale): did_scale = True
 
-                    # Flush Window if Scaled
+                    # --- RESET LOGIC ON SCALE ---
                     if did_scale:
-                        print("🔄 Scaling occurred! Flushing TTFT window.")
+                        print("🔄 Scaling occurred! Resetting One-Shot Tuning logic.")
                         ttft_window.clear()
                         last_scaling_time = time.time()
+                        tuning_event_completed = False # Enable tuning for the next 80s
                         for s in active_servers_for_metrics: pass 
 
 async def startup_tasks():
