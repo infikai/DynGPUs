@@ -15,28 +15,25 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_adaptive_window.log"
 
 # --- 🎯 SLO & Adaptive Logic Configuration ---
-TTFT_SLO_TARGET_SECONDS = 6.8   # UPDATED
+TTFT_SLO_TARGET_SECONDS = 6.9
 
 # --- 🔒 ONE-SHOT TUNING CONFIGURATION ---
-TUNING_MODE_DURATION_SECONDS = 80
-ADAPTIVE_WINDOW_SECONDS = 80      
+TUNING_MODE_DURATION_SECONDS = 100
+ADAPTIVE_WINDOW_SECONDS = 100      
 
 # Minimum data required to allow a pre-emptive adjustment
 MIN_WINDOW_DURATION_FOR_DECISION = 15 
 
 # Percentile Targets
-MAX_SLO_VIOLATION_RATIO = 0.08    # > 8% slow? Lower threshold.
-SAFE_SLO_VIOLATION_RATIO = 0.02   # < 2% slow? Raise threshold.
+MAX_SLO_VIOLATION_RATIO = 0.12    # > 8% slow? Lower threshold.
+SAFE_SLO_VIOLATION_RATIO = 0.03   # < 2% slow? Raise threshold.
 
 # Threshold tuning
-INITIAL_UP_THRESHOLD = 16.0     # UPDATED
+INITIAL_UP_THRESHOLD = 16.0
 MIN_UP_THRESHOLD = 3.0
 MAX_UP_THRESHOLD = 50.0
-THRESHOLD_STEP_SIZE = 0.5 
-DOWN_THRESHOLD_RATIO = 0.6
-
-# "Old" Server Definition
-WARMUP_GRACE_PERIOD_SECONDS = 45 
+THRESHOLD_STEP_SIZE = 1.0         
+DOWN_THRESHOLD_RATIO = 0.5
 
 # Standard Autoscaling Rules
 MIN_ACTIVE_SERVERS = 1
@@ -45,7 +42,7 @@ SCALING_COOLDOWN_SECONDS = 20
 # --- ⏱️ INTERVAL CONFIGURATION ---
 TTFT_MONITOR_INTERVAL_SECONDS = 0.5
 LOAD_MONITOR_INTERVAL_SECONDS = 2.0
-LOAD_HISTORY_SIZE = 12          # UPDATED
+LOAD_HISTORY_SIZE = 12
 
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
 GPU_MEMORY_FREE_THRESHOLD_MB = 3000
@@ -56,9 +53,9 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
-    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True, "active_since": 0},
-    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True, "active_since": 0},
-    {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True, "active_since": time.time()}, 
+    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
+    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True}, 
 ]
 
 # --- Helper Functions ---
@@ -168,7 +165,6 @@ async def scale_down(count: int) -> bool:
     servers_to_scale_down = shared_active_servers[:actual_count]
     for server in servers_to_scale_down: 
         server['status'] = 'sleeping'
-        server['active_since'] = 0 
     
     if not await update_haproxy_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         for server in servers_to_scale_down: server['status'] = 'active'
@@ -224,7 +220,6 @@ async def scale_up(count: int) -> bool:
     for server in servers_to_wake:
         await set_server_sleep_state(server, sleep=False)
         server['status'] = 'active'
-        server['active_since'] = time.time() 
 
     if await update_haproxy_config([s for s in ALL_SERVERS if s['status'] == 'active']):
         reload_haproxy()
@@ -247,7 +242,7 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started (Pre-Emptive Interrupt Tuning)...")
+    print(f"🚀 Autoscaler started (Pre-Emptive Interrupt Tuning, No Warmup)...")
     print(f"ℹ️  Tuning: {TUNING_MODE_DURATION_SECONDS}s. Pre-emptive check enabled.")
     print(f"ℹ️  Sampling: TTFT={TTFT_MONITOR_INTERVAL_SECONDS}s | Load={LOAD_MONITOR_INTERVAL_SECONDS}s")
 
@@ -295,7 +290,8 @@ async def autoscaler_task():
                     'ttft_count': current_m['ttft_count']
                 }
 
-                if delta_count > 0 and (current_time - server['active_since']) > WARMUP_GRACE_PERIOD_SECONDS:
+                # REMOVED OLD SERVER CHECK: Collect data from everyone instantly
+                if delta_count > 0:
                     instant_ttft = delta_sum / delta_count
                     ttft_window.append((current_time, instant_ttft))
             
