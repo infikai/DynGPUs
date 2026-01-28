@@ -15,7 +15,6 @@ class Scheduler:
         self.clock = SimulationClock(tick_duration=tick_duration)
 
         # Queue for GPUs currently initializing (Scaling Up)
-        # Format: {'job': job_obj, 'new_gpus': [gpu_list], 'time_left': seconds}
         self.pending_scaling_events = []
 
         # Intervals
@@ -191,10 +190,8 @@ class Scheduler:
         return False
 
     def _dispatch_large_inference_job(self, job):
-        effective_gpu_mem = GPU_MEMORY_GB
-        gpus_needed = max(math.ceil(job.memory_required / effective_gpu_mem),
-                          math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
-        job.gpus_needed = gpus_needed
+        # --- FIXED: Use job.gpus_needed directly ---
+        gpus_needed = job.gpus_needed
         
         allocated_gpus = self.cluster.find_idle_gpus_in_inference_pool(gpus_needed)
         if len(allocated_gpus) == gpus_needed:
@@ -208,9 +205,8 @@ class Scheduler:
         return False
         
     def _dispatch_training_job(self, job):
-        desired_gpus = max(math.ceil(job.memory_required / GPU_MEMORY_GB),
-                           math.ceil(job.utilization_required / GPU_UTILIZATION_PERCENT), 1)
-        job.gpus_needed = desired_gpus
+        # --- FIXED: Use job.gpus_needed directly ---
+        desired_gpus = job.gpus_needed
         min_gpus = 1 
 
         assigned_gpus = []
@@ -243,20 +239,15 @@ class Scheduler:
         return False
 
     def _try_scale_up_training_jobs(self):
-        """
-        Scans training jobs. If more GPUs are desired and found, they are 
-        placed into a 'pre-initialization' queue.
-        """
         for job in self.running_jobs:
             if job.job_type == 'training':
                 
-                # Skip if this job is already scaling up (waiting for init)
                 is_already_scaling = any(evt['job'] == job for evt in self.pending_scaling_events)
                 if is_already_scaling:
                     continue
 
                 current_count = len(job.assigned_gpus)
-                desired = getattr(job, 'gpus_needed', 1) 
+                desired = job.gpus_needed 
                 
                 if current_count < desired:
                     needed = desired - current_count
@@ -279,21 +270,17 @@ class Scheduler:
                             newly_acquired = newly_acquired[:needed]
 
                     if newly_acquired:
-                        # Mark them as busy immediately so no one else takes them
+                        # Mark as busy/reserved
                         for gpu in newly_acquired:
                              if gpu.gpu_type == 'inference':
                                 gpu.state = 'TRAIN'
                                 gpu.protect_time_remaining = 0
-                             # Note: We do NOT call assign_task() yet. 
-                             # They are effectively "reserved" because state != FREE.
-
-                        # Determine Pre-Init Time
+                        
                         if desired > 16:
                             init_time = 140
                         else:
                             init_time = 40
                         
-                        # Queue the scaling event
                         self.pending_scaling_events.append({
                             'job': job,
                             'new_gpus': newly_acquired,
@@ -301,34 +288,24 @@ class Scheduler:
                         })
 
     def _process_scaling_events(self):
-        """
-        Decrements timers for initializing GPUs. When initialized, merges them.
-        """
-        # Iterate over a copy so we can remove items
         for event in list(self.pending_scaling_events):
             event['time_left'] -= self.clock.tick_duration
             
             if event['time_left'] <= 0:
-                # Initialization Complete -> Merge
                 job = event['job']
                 new_gpus = event['new_gpus']
                 
                 if job not in self.running_jobs:
-                    # Job finished/died while waiting. Release new GPUs.
                     for gpu in new_gpus:
                         if gpu.gpu_type == 'inference':
                             gpu.state = 'FREE'
                     self.pending_scaling_events.remove(event)
                     continue
 
-                # Perform the merge
                 old_gpus = list(job.assigned_gpus)
-                
-                # 1. Release old tasks (resets internal counters)
                 for gpu in old_gpus: 
                     gpu.release_task(job)
                 
-                # 2. Combine and Re-assign
                 all_gpus = old_gpus + new_gpus
                 job.assign_resources(all_gpus, job.start_time)
                 
@@ -337,17 +314,12 @@ class Scheduler:
                         gpu.state = 'TRAIN'
                     gpu.assign_task(job)
                 
-                # 3. Apply Sync Penalty
                 job.overhead_remaining += OVERHEAD_AFE_SYNC
-                
-                # Remove event
                 self.pending_scaling_events.remove(event)
 
     def _handle_job_completion(self, job):
-        # Cleanup any pending scaling events for this job
         for event in list(self.pending_scaling_events):
             if event['job'] == job:
-                # Release the reserved GPUs
                 for gpu in event['new_gpus']:
                     if gpu.gpu_type == 'inference':
                         gpu.state = 'FREE'
@@ -429,10 +401,7 @@ class Scheduler:
             for gpu in self.cluster.inference_gpus:
                 gpu.update_lifecycle(self.clock.tick_duration)
 
-            # 1. Check for scaling opportunities
             self._try_scale_up_training_jobs()
-            
-            # 2. Advance scaling timers
             self._process_scaling_events()
 
             if self.clock.current_time >= self.next_delay_log_time:
