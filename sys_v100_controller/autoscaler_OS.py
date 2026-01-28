@@ -15,25 +15,25 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_adaptive_window.log"
 
 # --- 🎯 SLO & Adaptive Logic Configuration ---
-TTFT_SLO_TARGET_SECONDS = 2.0 
+TTFT_SLO_TARGET_SECONDS = 6.8 
 
 # Adaptive Window Logic
 ADAPTIVE_WINDOW_SECONDS = 60      
 MIN_WINDOW_DURATION_FOR_DECISION = 15 
 
 # Percentile Targets
-MAX_SLO_VIOLATION_RATIO = 0.20
-SAFE_SLO_VIOLATION_RATIO = 0.01
+MAX_SLO_VIOLATION_RATIO = 0.08
+SAFE_SLO_VIOLATION_RATIO = 0.2
 
 # Threshold tuning
-INITIAL_UP_THRESHOLD = 10.0
+INITIAL_UP_THRESHOLD = 20.0
 MIN_UP_THRESHOLD = 3.0
 MAX_UP_THRESHOLD = 50.0
-THRESHOLD_STEP_SIZE = 0.5
+THRESHOLD_STEP_SIZE = 1.0
 DOWN_THRESHOLD_RATIO = 0.6
 
 # "Old" Server Definition
-WARMUP_GRACE_PERIOD_SECONDS = 45 
+WARMUP_GRACE_PERIOD_SECONDS = 20 
 
 # Standard Autoscaling Rules
 MIN_ACTIVE_SERVERS = 1
@@ -47,8 +47,8 @@ TTFT_MONITOR_INTERVAL_SECONDS = 0.5
 LOAD_MONITOR_INTERVAL_SECONDS = 2.0
 
 # Load Smoothing Window: 
-# 4 samples * 2.0 seconds = 8 second effective smoothing window.
-LOAD_HISTORY_SIZE = 4
+# 8 samples * 2.0 seconds = 8 second effective smoothing window.
+LOAD_HISTORY_SIZE = 8
 
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
 GPU_MEMORY_FREE_THRESHOLD_MB = 3000
