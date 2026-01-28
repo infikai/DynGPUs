@@ -43,6 +43,7 @@ class GPU:
         
         self.state = 'FREE' 
         self.protect_time_remaining = 0
+        self.reclaim_time_remaining = 0 # Tracks switch delay
         self.usage_count = 0  
         
         self.total_memory = GPU_MEMORY_GB
@@ -55,7 +56,14 @@ class GPU:
         self.running_tasks = {}
 
     def update_lifecycle(self, tick_duration):
-        """Updates the PROTECT timer. Transitions PROTECT -> FREE on timeout."""
+        """Updates lifecycle timers (Protect and Reclaim)."""
+        # 1. Handle Reclaim Countdown
+        if self.reclaim_time_remaining > 0:
+            self.reclaim_time_remaining -= tick_duration
+            if self.reclaim_time_remaining < 0:
+                self.reclaim_time_remaining = 0
+
+        # 2. Handle Protect Countdown
         if self.state == 'PROTECT':
             self.protect_time_remaining -= tick_duration
             if self.protect_time_remaining <= 0:
@@ -92,6 +100,12 @@ class GPU:
             self.usage_count = 0
             return True
         return False
+    
+    def start_reclaim(self):
+        """Triggers the reclaim overhead timer."""
+        self.state = 'RUN'
+        self.reclaim_time_remaining = OVERHEAD_RECLAIM
+        self.usage_count = 0
 
     def calculate_protection_time(self):
         """DeepBoot Formula: t_p = t_p,min + g.cnt * interval"""
@@ -102,7 +116,6 @@ class GPU:
         """Assigns a task. For Inference, state becomes RUN. For Training, TRAIN."""
         self.running_tasks[job.id] = {'job': job}
         
-        # DeepBoot State Transitions on Assignment
         if job.job_type in ['inference', 'llm_inference']:
             self.state = 'RUN'
         else:
@@ -119,7 +132,6 @@ class GPU:
             if job.job_type == 'training':
                 self.available_memory += job.memory_required
     
-    # Support for stackable inference checks
     def can_fit(self, job):
         return (job.memory_required <= self.available_memory and
                 job.utilization_required <= self.available_utilization)
@@ -133,13 +145,12 @@ class Job:
                  memory_required=1, utilization_required=1,
                  input_tokens=0, output_tokens=0):
         self.id = id
-        self.job_type = job_type  # 'training', 'inference', 'llm_inference'
+        self.job_type = job_type
         self.arrival_time = arrival_time
         
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         
-        # 1. Calculate Duration for LLM jobs if not provided
         if self.job_type == 'llm_inference' and base_duration == 0:
             self.base_duration = (LLM_BASE_TTFT + 
                                   (LLM_TKN_PER_INPUT * input_tokens) + 
@@ -150,13 +161,9 @@ class Job:
         self.memory_required = max(memory_required, 1)
         self.utilization_required = max(utilization_required, 1)
         
-        # 2. Calculate Required GPUs (The "Ideal" Count)
         self.gpus_needed = max(math.ceil(self.memory_required / GPU_MEMORY_GB),
                                math.ceil(self.utilization_required / GPU_UTILIZATION_PERCENT), 1)
 
-        # 3. Calculate Total Work (Single-GPU Seconds)
-        # "Base Duration" is assumed to be the runtime on "gpus_needed".
-        # Therefore: Total Work = Base Duration * Speedup(gpus_needed)
         self.remaining_work = self.base_duration * self.calculate_speedup(self.gpus_needed)
         
         self.assigned_gpus = []
@@ -173,20 +180,21 @@ class Job:
 
     def calculate_speedup(self, num_gpus):
         if num_gpus <= 0: return 0.0
-        # Linear scaling as requested
         return num_gpus ** 1.0
 
     def update_progress(self, time_delta, current_time):
         if not self.assigned_gpus:
             return
+        
+        # --- NEW: If waiting for reclaim/init, do NOT process overhead/work yet ---
+        if self.start_time > current_time:
+            return
 
-        # 1. Consume Overhead
         if self.overhead_remaining > 0:
             deduct = min(self.overhead_remaining, time_delta)
             self.overhead_remaining -= deduct
             time_delta -= deduct 
         
-        # 2. Consume Real Work
         if time_delta > 0 and self.overhead_remaining <= 0:
             if self.job_type == 'training':
                 speedup = self.calculate_speedup(len(self.assigned_gpus))
