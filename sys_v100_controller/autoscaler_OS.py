@@ -15,7 +15,7 @@ ACTIVE_WORKERS_FILE = "./active_workers.txt"
 TTFT_LOG_FILE = "./ttft_adaptive_window.log"
 
 # --- 🎯 SLO & Adaptive Logic Configuration ---
-TTFT_SLO_TARGET_SECONDS = 6.5 
+TTFT_SLO_TARGET_SECONDS = 6.8
 
 # --- 🔒 ONE-SHOT TUNING CONFIGURATION ---
 TUNING_MODE_DURATION_SECONDS = 80
