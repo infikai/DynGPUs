@@ -25,9 +25,9 @@ class Scheduler:
         self.next_delay_log_time = 0
         self.current_inference_delays = []
 
-        self.training_log_file = open("training_job_log_hvd.csv", "w")
-        self.inference_delay_log_file = open("inference_delay_log_hvd.csv", "w")
-        self.usage_log_file = open("gpu_usage_log_hvd.csv", "w")
+        self.training_log_file = open("training_job_log.csv", "w")
+        self.inference_delay_log_file = open("inference_delay_log.csv", "w")
+        self.usage_log_file = open("gpu_usage_log.csv", "w")
         self._initialize_logs()
 
     def _initialize_logs(self):
