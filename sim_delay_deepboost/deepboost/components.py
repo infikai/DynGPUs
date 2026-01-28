@@ -139,7 +139,7 @@ class Job:
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         
-        # Calculate duration for LLM jobs if not provided
+        # 1. Calculate Duration for LLM jobs if not provided
         if self.job_type == 'llm_inference' and base_duration == 0:
             self.base_duration = (LLM_BASE_TTFT + 
                                   (LLM_TKN_PER_INPUT * input_tokens) + 
@@ -147,15 +147,22 @@ class Job:
         else:
             self.base_duration = base_duration
 
-        self.remaining_work = self.base_duration
         self.memory_required = max(memory_required, 1)
         self.utilization_required = max(utilization_required, 1)
+        
+        # 2. Calculate Required GPUs (The "Ideal" Count)
+        self.gpus_needed = max(math.ceil(self.memory_required / GPU_MEMORY_GB),
+                               math.ceil(self.utilization_required / GPU_UTILIZATION_PERCENT), 1)
+
+        # 3. Calculate Total Work (Single-GPU Seconds)
+        # "Base Duration" is assumed to be the runtime on "gpus_needed".
+        # Therefore: Total Work = Base Duration * Speedup(gpus_needed)
+        self.remaining_work = self.base_duration * self.calculate_speedup(self.gpus_needed)
         
         self.assigned_gpus = []
         self.start_time = -1
         self.completion_time = -1
         self.turnaround_time = -1
-        self.gpus_needed = 1  
         
         self.overhead_remaining = 0.0
 
@@ -195,4 +202,4 @@ class Job:
         self.turnaround_time = self.completion_time - self.arrival_time
     
     def __repr__(self):
-        return f"[{self.id} | {self.job_type} | Rem:{self.remaining_work:.1f}s]"
+        return f"[{self.id} | {self.job_type} | RemWork:{self.remaining_work:.1f}]"
