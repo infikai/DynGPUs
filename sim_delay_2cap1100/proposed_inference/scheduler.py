@@ -297,6 +297,15 @@ class Scheduler:
             
             for job in finished_this_tick:
                 self._handle_job_completion(job)
+            
+            for g in self.cluster.inference_pool:
+                if g.is_llm_server and g.reclamation_cooldown_timer > 0:
+                    g.reclamation_cooldown_timer -= self.clock.tick_duration
+            
+            for g in self.cluster.training_pool:
+                if g.is_llm_server and g.reclamation_cooldown_timer > 0:
+                    g.reclamation_cooldown_timer -= self.clock.tick_duration
+
 
     def print_results(self):
         self._log_average_inference_delay()
