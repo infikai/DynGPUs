@@ -431,9 +431,9 @@ class Scheduler:
         
         if job.job_type == 'training':
             for gpu in freed_gpus:
-                if gpu.gpu_type == 'inference':
-                    gpu.state = 'FREE'
-                    gpu.usage_count = 0
+                # ALL GPUs released by a training job.
+                gpu.state = 'FREE'
+                gpu.usage_count = 0
     
     def _log_average_inference_delay(self):
         if not self.current_inference_delays:
