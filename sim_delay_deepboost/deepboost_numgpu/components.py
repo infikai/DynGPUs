@@ -22,9 +22,9 @@ OVERHEAD_RECLAIM = 15.0         # Time to context switch a LOANED GPU
 OVERHEAD_AFE_SYNC = 3.0         # Time for training job to sync after shrink
 
 # DeepBoot Protection Time Formula
-PROTECT_MIN = 30
-PROTECT_MAX = 120
-PROTECT_INTERVAL = 15
+PROTECT_MIN = 60
+PROTECT_MAX = 600
+PROTECT_INTERVAL = 30
 
 
 class SimulationClock:
