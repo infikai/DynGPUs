@@ -309,7 +309,6 @@ class Scheduler:
         return False
 
     def _try_scale_up_training_jobs(self):
-        def _try_scale_up_training_jobs(self):
         # OPTIMIZATION: Fast Fail
         # If no GPUs are idle, don't bother checking if jobs want to scale.
         # This saves millions of loop iterations when the cluster is full.
