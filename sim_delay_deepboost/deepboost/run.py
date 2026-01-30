@@ -73,7 +73,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    cluster = ClusterManager(num_training_gpus=485, num_inference_gpus=615)
+    cluster = ClusterManager(num_training_gpus=450, num_inference_gpus=650)
 
     workload = load_jobs_from_csv(args.csv_file)
     if args.llm_trace:
