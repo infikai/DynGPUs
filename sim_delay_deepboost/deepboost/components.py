@@ -19,12 +19,12 @@ LLM_TPOT = 0.1               # Time per output token
 OVERHEAD_COLD_START = 2.5       # Time to load model on FREE GPU
 OVERHEAD_WARM_START = 0.01      # Time to start on PROTECT/RUN GPU
 OVERHEAD_RECLAIM = 15.0         # Time to context switch a LOANED GPU
-OVERHEAD_AFE_SYNC = 3.0         # Time for training job to sync after shrink
+OVERHEAD_AFE_SYNC = 4.0         # Time for training job to sync after shrink
 
 # DeepBoot Protection Time Formula
-PROTECT_MIN = 30
-PROTECT_MAX = 120
-PROTECT_INTERVAL = 15
+PROTECT_MIN = 60
+PROTECT_MAX = 240
+PROTECT_INTERVAL = 30
 
 
 class SimulationClock:
