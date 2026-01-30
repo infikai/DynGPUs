@@ -296,7 +296,7 @@ class Scheduler:
                     if len(assigned_gpus) == desired_gpus:
                         break
         
-        if len(assigned_gpus) >= desired_gpus:
+        if len(assigned_gpus) == desired_gpus:
             job.assign_resources(assigned_gpus, self.clock.current_time)
             for gpu in assigned_gpus:
                 if gpu.gpu_type == 'inference':
