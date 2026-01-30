@@ -33,33 +33,40 @@ class Scheduler:
     def _initialize_logs(self):
         self.training_log_file.write("job_id,arrival_time,start_time,delay,base_duration,ideal_completion_time,actual_completion_time,performance_factor,gpus\n")
         self.inference_delay_log_file.write("timestamp,average_delay_seconds,job_count\n")
-        self.usage_log_file.write("timestamp,training_gpus_used,inference_gpus_used,borrowed_inference_gpus,gpus_in_protect\n")
+        
+        # UPDATED HEADER: Added 'protected_gpus' at the end
+        self.usage_log_file.write("timestamp,real_inf_running,theoretical_inf_demand,total_train_active,loaned_train,protected_gpus\n")
 
     def _log_gpu_usage(self):
-        training_gpus_used = 0
-        inference_gpus_used = 0
-        borrowed_gpus_used = 0 
-        protect_gpus_count = 0 
-
-        for gpu in self.cluster.training_gpus:
-            if not gpu.is_idle():
-                training_gpus_used += 1
-
-        for gpu in self.cluster.inference_gpus:
-            if gpu.state == 'PROTECT':
-                protect_gpus_count += 1
-
-            if gpu.is_llm_server:
-                inference_gpus_used += 1
-            elif not gpu.is_idle():
-                inference_gpus_used += 1
-                for task in gpu.running_tasks.values():
-                    if task['job'].job_type == 'training':
-                         borrowed_gpus_used += 1
-                         inference_gpus_used -= 1
-                         break
+        # 1. Count REAL physical allocation (GPU units)
+        # Count only 'RUN' state as active (doing work)
+        real_inf_running = sum(1 for g in self.cluster.inference_gpus if g.state == 'RUN')
         
-        self.usage_log_file.write(f"{self.clock.current_time},{training_gpus_used},{inference_gpus_used},{borrowed_gpus_used},{protect_gpus_count}\n")
+        # Count 'PROTECT' state (Idle but warm/holding resources)
+        protected_inf = sum(1 for g in self.cluster.inference_gpus if g.state == 'PROTECT')
+        
+        real_train_dedicated = sum(1 for g in self.cluster.training_gpus if not g.is_idle())
+        real_inf_loaned = sum(1 for g in self.cluster.inference_gpus if g.state == 'TRAIN')
+        
+        # 2. Count TOTAL Job Demand (Job units)
+        active_inf_jobs = len([j for j in self.running_jobs if j.job_type == 'llm_inference'])
+        pending_inf_jobs = len([j for j in self.jobs_to_retry if j.job_type == 'llm_inference'])
+        
+        # 3. Calculate Virtual Peak (GPU units)
+        # Demand = (Running Jobs + Waiting Jobs) / Concurrency Limit
+        import math
+        total_inf_jobs = active_inf_jobs + pending_inf_jobs
+        theoretical_inf_gpu_demand = math.ceil(total_inf_jobs / LLM_MAX_CONCURRENCY)
+        
+        # Total Training (Dedicated + Loaned)
+        total_train_gpu_demand = real_train_dedicated + real_inf_loaned
+
+        # Log Format: 
+        # Timestamp, Real_Inf_Running, Theoretical_Inf_Demand, Real_Train_Active, Loaned_Train, Protected_GPUs
+        self.usage_log_file.write(
+            f"{self.clock.current_time},{real_inf_running},{theoretical_inf_gpu_demand},"
+            f"{total_train_gpu_demand},{real_inf_loaned},{protected_inf}\n"
+        )
     
     def _dispatch_job(self, job):
         if job.job_type == 'training':
@@ -71,116 +78,63 @@ class Scheduler:
         return False
     
     def _batch_dispatch_llm_jobs(self, llm_jobs):
-        if not llm_jobs:
-            return []
+        if not llm_jobs: return []
+        remaining = deque(llm_jobs)
 
-        # === Phase 1: Try Warm/Cold GPUs ===
-        num_jobs_to_assign = len(llm_jobs)
-        available_gpus, _ = self.cluster.find_resources_for_llm_batch(num_jobs_to_assign)
-        
-        assigned_count = 0
-        job_index = 0
-        
-        for gpu in available_gpus:
-            if job_index >= num_jobs_to_assign:
-                break 
+        # Tier 1: Existing RUN servers (fill slots first)
+        active = [g for g in self.cluster.inference_gpus if g.state == 'RUN' and g.llm_slots_available > 0]
+        for gpu in active:
+            while gpu.llm_slots_available > 0 and remaining:
+                self._assign_llm_to_gpu(remaining.popleft(), gpu)
 
-            base_overhead = OVERHEAD_WARM_START
-            if gpu.state == 'FREE':
-                base_overhead = OVERHEAD_COLD_START
+        # Tier 2: Protected GPUs (Warm but currently idle)
+        protected = [g for g in self.cluster.inference_gpus if g.state == 'PROTECT']
+        for gpu in protected:
+            if not remaining: break
+            gpu.state = 'RUN'
+            while gpu.llm_slots_available > 0 and remaining:
+                self._assign_llm_to_gpu(remaining.popleft(), gpu)
 
-            slots_to_fill = 0
-            if not gpu.is_llm_server:
-                was_converted = gpu.convert_to_llm_server()
-                if not was_converted:
-                    continue 
-                slots_to_fill = gpu.llm_slots_available
-            else:
-                slots_to_fill = gpu.llm_slots_available
-                
-            for _ in range(slots_to_fill):
-                if job_index >= num_jobs_to_assign:
-                    break 
-                
-                job = llm_jobs[job_index]
-                job.assigned_gpus = [gpu]
-                
-                wait_time = gpu.reclaim_time_remaining
-                job.start_time = self.clock.current_time + wait_time
-                job.overhead_remaining = base_overhead
+        # Tier 3: Idle FREE GPUs (Expand footprint)
+        idle_inf = [g for g in self.cluster.inference_gpus if g.state == 'FREE' and g.is_idle()]
+        for gpu in idle_inf:
+            if not remaining: break
+            gpu.state = 'RUN'
+            while gpu.llm_slots_available > 0 and remaining:
+                self._assign_llm_to_gpu(remaining.popleft(), gpu)
 
-                delay = math.floor(max(0, job.start_time - job.arrival_time))
-                if delay > 0:
-                    self.current_inference_delays.append(delay)
-                
-                gpu.assign_llm_task(job) 
-                self.running_jobs.append(job)
-                
-                assigned_count += 1
-                job_index += 1
-
-        # === Phase 2: Try Reclaiming (Preemption) ===
-        if assigned_count < num_jobs_to_assign:
-            remaining_jobs = deque(llm_jobs[assigned_count:])
-            still_unassigned = []
-
-            while remaining_jobs:
-                # Get the first job ("Leader")
-                job_leader = remaining_jobs.popleft()
-                
+        # Tier 4: Reclaim (Preempt Training)
+        if remaining:
+            # We keep trying to reclaim as long as we have jobs and targets
+            while remaining:
                 gpu = self.cluster.find_reclaim_target()
+                if not gpu: break # No more training jobs to kill
                 
-                if gpu:
-                    # 1. Preempt Training Job
-                    if gpu.running_tasks:
-                        training_job = list(gpu.running_tasks.values())[0]['job']
-                        self._preempt_training_job(training_job, gpu)
+                # Preempt training
+                if gpu.running_tasks:
+                    training_job = list(gpu.running_tasks.values())[0]['job']
+                    self._preempt_training_job(training_job, gpu)
+                
+                # Instant transition (Peak Usage Focus)
+                gpu.state = 'RUN'
+                gpu.reclaim_time_remaining = 0 # Force instant
+                
+                while gpu.llm_slots_available > 0 and remaining:
+                    self._assign_llm_to_gpu(remaining.popleft(), gpu)
 
-                    # 2. Start Physical Reclaim Timer
-                    gpu.start_reclaim()
-
-                    # 3. Assign the Leader Job
-                    # Wait for reclaim (Delay) + Warm Start Overhead
-                    job_leader.start_time = self.clock.current_time + OVERHEAD_RECLAIM
-                    job_leader.overhead_remaining = OVERHEAD_WARM_START
-                    job_leader.assigned_gpus = [gpu]
-                    
-                    delay = math.floor(max(0, job_leader.start_time - job_leader.arrival_time))
-                    if delay > 0:
-                        self.current_inference_delays.append(delay)
-
-                    gpu.assign_llm_task(job_leader)
-                    self.running_jobs.append(job_leader)
-
-                    # --- FIX: FILL REMAINING SLOTS IMMEDIATELY ---
-                    # We just paid a huge penalty to open this GPU. Fill it up!
-                    slots_remaining = LLM_MAX_CONCURRENCY - 1
-                    
-                    while slots_remaining > 0 and remaining_jobs:
-                        job_follower = remaining_jobs.popleft()
-                        
-                        # Followers share the EXACT SAME wait conditions as the leader
-                        job_follower.start_time = self.clock.current_time + OVERHEAD_RECLAIM
-                        job_follower.overhead_remaining = OVERHEAD_WARM_START
-                        job_follower.assigned_gpus = [gpu]
-                        
-                        delay_f = math.floor(max(0, job_follower.start_time - job_follower.arrival_time))
-                        if delay_f > 0:
-                            self.current_inference_delays.append(delay_f)
-                        
-                        gpu.assign_llm_task(job_follower)
-                        self.running_jobs.append(job_follower)
-                        slots_remaining -= 1
-
-                else:
-                    # No reclaim targets left? Fail this job and all remaining
-                    still_unassigned.append(job_leader)
-                    still_unassigned.extend(remaining_jobs)
-                    break
-            
-            return still_unassigned
-
-        return []
+        return list(remaining)
+    
+    def _assign_llm_to_gpu(self, job, gpu):
+        """Helper to standardize assignment with ZERO delay for Peak Analysis."""
+        gpu.usage_count += 1
+        job.assigned_gpus = [gpu]
+        
+        # KEY CHANGE: Start time is NOW. No overheads.
+        job.start_time = self.clock.current_time 
+        job.overhead_remaining = 0 
+        
+        gpu.assign_llm_task(job)
+        self.running_jobs.append(job)
 
     def _dispatch_llm_inference_job(self, job):
         gpu = self.cluster.find_gpu_for_llm_job()
@@ -276,35 +230,27 @@ class Scheduler:
         return False
         
     def _dispatch_training_job(self, job):
-        desired_gpus = job.gpus_needed
-        min_gpus = 1 
-
-        assigned_gpus = []
-
-        # Priority 1: Dedicated Training GPUs
-        for gpu in self.cluster.training_gpus:
-            if gpu.is_idle():
-                assigned_gpus.append(gpu)
-                if len(assigned_gpus) == desired_gpus:
-                    break
+        count = job.gpus_needed
         
-        # Priority 2: Borrow from Inference Pool
-        if len(assigned_gpus) < desired_gpus:
-            for gpu in self.cluster.inference_gpus:
-                if gpu.is_idle():
-                    assigned_gpus.append(gpu)
-                    if len(assigned_gpus) == desired_gpus:
-                        break
+        # 1. Training Pool (Used) - Restricted by previous_peak
+        train_used = [g for g in self.cluster.training_gpus if g.is_idle() and g.ever_used]
+        # 2. Inference Pool (Used & FREE)
+        inf_used = [g for g in self.cluster.inference_gpus if g.is_idle() and g.state == 'FREE' and g.ever_used]
+        # 3. Training Pool (New)
+        train_new = [g for g in self.cluster.training_gpus if g.is_idle() and not g.ever_used]
+        # 4. Inference Pool (New & FREE)
+        inf_new = [g for g in self.cluster.inference_gpus if g.is_idle() and g.state == 'FREE' and not g.ever_used]
+
+        search_order = train_used + inf_used + train_new + inf_new
         
-        if len(assigned_gpus) >= min_gpus:
-            job.assign_resources(assigned_gpus, self.clock.current_time)
-            for gpu in assigned_gpus:
-                if gpu.gpu_type == 'inference':
-                    gpu.state = 'TRAIN'
-                    gpu.protect_time_remaining = 0
+        if len(search_order) >= count:
+            allocated = search_order[:count]
+            job.assign_resources(allocated, self.clock.current_time)
+            for gpu in allocated:
+                if gpu.gpu_type == 'inference': gpu.state = 'TRAIN'
                 gpu.assign_task(job)
-                
             self.running_jobs.append(job)
+            self.cluster.update_peaks()
             return True
         return False
 
@@ -533,8 +479,11 @@ class Scheduler:
             for job in finished: self._handle_job_completion(job)
 
     def print_results(self):
-        self._log_average_inference_delay()
         self.training_log_file.close()
-        self.inference_delay_log_file.close()
         self.usage_log_file.close()
+        
+        print("\n=== PEAK USAGE ANALYSIS ===")
+        print(f"Max Concurrent Inference Slots Used: {self.cluster.inference_pool_peak}")
+        print(f"Max Concurrent Training GPUs Used:   {self.cluster.training_pool_peak}")
+        print("===========================\n")
         print("Simulation Complete. Results saved.")

@@ -44,7 +44,8 @@ class GPU:
         self.state = 'FREE' 
         self.protect_time_remaining = 0
         self.reclaim_time_remaining = 0 # Tracks switch delay
-        self.usage_count = 0  
+        self.usage_count = 0
+        self.ever_used = False # NEW: Persistent flag for peak tracking 
         
         self.total_memory = GPU_MEMORY_GB
         self.total_utilization = GPU_UTILIZATION_PERCENT
@@ -115,6 +116,7 @@ class GPU:
     def assign_task(self, job):
         """Assigns a task. For Inference, state becomes RUN. For Training, TRAIN."""
         self.running_tasks[job.id] = {'job': job}
+        self.ever_used = True
         
         if job.job_type in ['inference', 'llm_inference']:
             self.state = 'RUN'

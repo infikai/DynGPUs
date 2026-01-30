@@ -7,6 +7,18 @@ class ClusterManager:
         self.training_gpus = [GPU(f"T_{i}", 'training') for i in range(num_training_gpus)]
         self.inference_gpus = [GPU(f"I_{i}", 'inference') for i in range(num_inference_gpus)]
         print(f"ClusterManager initialized: {num_training_gpus} Training GPUs, {num_inference_gpus} Inference GPUs.")
+        self.training_pool_peak = 0
+        self.inference_pool_peak = 0
+
+    def update_peaks(self):
+        """Updates the high-water marks for both pools."""
+        current_train = sum(1 for g in self.training_gpus if not g.is_idle())
+        # Borrowed GPUs count toward training throughput peak
+        borrowed = sum(1 for g in self.inference_gpus if g.state == 'TRAIN')
+        self.training_pool_peak = max(self.training_pool_peak, current_train + borrowed)
+
+        current_inf = sum(1 for g in self.inference_gpus if g.is_llm_server)
+        self.inference_pool_peak = max(self.inference_pool_peak, current_inf)
 
     def find_resources_for_llm_batch(self, num_jobs_needed):
         available_gpus = [] 
