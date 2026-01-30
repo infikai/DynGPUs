@@ -232,7 +232,15 @@ class Scheduler:
         gpu.release_task(job)
         if gpu in job.assigned_gpus:
             job.assigned_gpus.remove(gpu)
-        job.overhead_remaining += OVERHEAD_AFE_SYNC
+        
+        # FIX: Check if we already applied the penalty at this timestamp
+        # We use dynamic attribute assignment to track the last penalty time
+        current_time = self.clock.current_time
+        last_penalty_time = getattr(job, 'last_penalty_time', -1)
+        
+        if last_penalty_time != current_time:
+            job.overhead_remaining += OVERHEAD_AFE_SYNC
+            job.last_penalty_time = current_time
 
     def _dispatch_inference_job(self, job):
         is_large_job = (job.memory_required > GPU_MEMORY_GB or 
@@ -301,6 +309,18 @@ class Scheduler:
         return False
 
     def _try_scale_up_training_jobs(self):
+        def _try_scale_up_training_jobs(self):
+        # OPTIMIZATION: Fast Fail
+        # If no GPUs are idle, don't bother checking if jobs want to scale.
+        # This saves millions of loop iterations when the cluster is full.
+        
+        # Check quickly if we have ANY free resources
+        has_idle_training = any(g.is_idle() for g in self.cluster.training_gpus)
+        has_idle_inference = any(g.is_idle() for g in self.cluster.inference_gpus)
+        
+        if not has_idle_training and not has_idle_inference:
+            return
+
         for job in self.running_jobs:
             if job.job_type == 'training':
                 
@@ -449,7 +469,10 @@ class Scheduler:
 
         self.clock.current_time = effective_start_time
         self.next_delay_log_time = ( (effective_start_time // self.delay_log_interval) + 1 ) * self.delay_log_interval
-        self.jobs_to_retry = deque() 
+        self.jobs_to_retry = deque()
+
+        # 1. Initialize the timer for scaling
+        next_scaling_check = self.clock.current_time
 
         while self.pending_jobs or self.running_jobs or self.jobs_to_retry:
             if self.end_time != -1 and self.clock.current_time >= self.end_time:
@@ -460,7 +483,10 @@ class Scheduler:
             for gpu in self.cluster.inference_gpus:
                 gpu.update_lifecycle(self.clock.tick_duration)
 
-            self._try_scale_up_training_jobs()
+            if self.clock.current_time >= next_scaling_check:
+                self._try_scale_up_training_jobs()
+                next_scaling_check = self.clock.current_time + 60
+
             self._process_scaling_events()
 
             if self.clock.current_time >= self.next_delay_log_time:
