@@ -497,7 +497,13 @@ class Scheduler:
             
             if self.clock.current_time % self.progress_interval == 0:
                 num_llm = sum(1 for j in self.running_jobs if j.job_type=='llm_inference')
-                print(f"Clock {self.clock.current_time}: Pending={len(self.pending_jobs)}, Running={len(self.running_jobs)} (LLM:{num_llm}), Completed={len(self.completed_jobs)}")
+
+                # NEW: Calculate total pending (Future + Backlog)
+                future_jobs = len(self.pending_jobs)
+                retry_jobs = len(self.jobs_to_retry)
+                total_pending = future_jobs + retry_jobs
+                
+                print(f"Clock {self.clock.current_time}: Pending={total_pending} (Backlog={retry_jobs}), Running={len(self.running_jobs)} (LLM:{num_llm}), Completed={len(self.completed_jobs)}")
             
             arrived_jobs = list(self.jobs_to_retry)
             self.jobs_to_retry.clear()
