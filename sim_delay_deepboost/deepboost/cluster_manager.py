@@ -48,7 +48,9 @@ class ClusterManager:
             current_gpus = len(job.assigned_gpus)
             
             if current_gpus <= 1:
-                loss = float('inf')
+                # FIX: Assign a high (but finite) loss to allow preemption if necessary
+                # or strictly enforce preemption for LLM bursts.
+                loss = 1000.0 
             else:
                 curr_speed = job.calculate_speedup(current_gpus)
                 next_speed = job.calculate_speedup(current_gpus - 1)
