@@ -23,7 +23,7 @@ OVERHEAD_AFE_SYNC = 4.0         # Time for training job to sync after shrink
 
 # DeepBoot Protection Time Formula
 PROTECT_MIN = 60
-PROTECT_MAX = 240
+PROTECT_MAX = 600
 PROTECT_INTERVAL = 30
 
 
