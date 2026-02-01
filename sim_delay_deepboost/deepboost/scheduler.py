@@ -483,8 +483,8 @@ class Scheduler:
                 gpu.update_lifecycle(self.clock.tick_duration)
 
             if self.clock.current_time >= next_scaling_check:
-                # self._try_scale_up_training_jobs()
-                next_scaling_check = self.clock.current_time + 60
+                self._try_scale_up_training_jobs()
+                next_scaling_check = self.clock.current_time + 5000
 
             self._process_scaling_events()
 
