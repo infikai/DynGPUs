@@ -242,7 +242,7 @@ async def log_active_servers():
 # --- MAIN AUTOSCALER TASK ---
 
 async def autoscaler_task():
-    print(f"🚀 Autoscaler started (Pre-Emptive Interrupt Tuning, No Warmup)...")
+    print(f"🚀 Autoscaler started (Pre-Emptive Tuning, Skipping First Adjustment)...")
     print(f"ℹ️  Tuning: {TUNING_MODE_DURATION_SECONDS}s. Pre-emptive check enabled.")
     print(f"ℹ️  Sampling: TTFT={TTFT_MONITOR_INTERVAL_SECONDS}s | Load={LOAD_MONITOR_INTERVAL_SECONDS}s")
 
@@ -251,6 +251,9 @@ async def autoscaler_task():
     
     # State flags for the One-Shot logic
     tuning_event_completed = False 
+    
+    # --- NEW FLAG: Skip First Adjustment ---
+    skip_initial_adjustment = True
 
     load_history = []
     smoothed_avg_load = 0.0 
@@ -290,12 +293,11 @@ async def autoscaler_task():
                     'ttft_count': current_m['ttft_count']
                 }
 
-                # REMOVED OLD SERVER CHECK: Collect data from everyone instantly
                 if delta_count > 0:
                     instant_ttft = delta_sum / delta_count
                     ttft_window.append((current_time, instant_ttft))
             
-            # Prune Window (Max 80s)
+            # Prune Window
             while ttft_window and (current_time - ttft_window[0][0]) > ADAPTIVE_WINDOW_SECONDS:
                 ttft_window.popleft()
 
@@ -306,7 +308,6 @@ async def autoscaler_task():
                 time_since_scale = current_time - last_scaling_time
 
                 # --- A. STANDARD TIMER-BASED TUNING ---
-                # If timer expires normally, we finalize the tuning.
                 if time_since_scale >= TUNING_MODE_DURATION_SECONDS and not tuning_event_completed:
                     if ttft_window:
                         window_duration = ttft_window[-1][0] - ttft_window[0][0]
@@ -319,7 +320,12 @@ async def autoscaler_task():
                             if violation_ratio > MAX_SLO_VIOLATION_RATIO: adjustment = -THRESHOLD_STEP_SIZE 
                             elif violation_ratio < SAFE_SLO_VIOLATION_RATIO: adjustment = THRESHOLD_STEP_SIZE
                             
-                            if adjustment != 0:
+                            # SKIP LOGIC
+                            if skip_initial_adjustment:
+                                print(f"\n✋ Skipping first tuning adjustment (Startup Stabilization).")
+                                print(f"   (Calculated Adj would be: {adjustment})")
+                                skip_initial_adjustment = False
+                            elif adjustment != 0:
                                 current_up_threshold = max(MIN_UP_THRESHOLD, min(MAX_UP_THRESHOLD, current_up_threshold + adjustment))
                                 current_down_threshold = current_up_threshold * DOWN_THRESHOLD_RATIO
                                 print(f"\n🎯 ONE-SHOT TUNING COMPLETED (Timer)!")
@@ -340,7 +346,6 @@ async def autoscaler_task():
 
 
                 # --- C. PRE-EMPTIVE INTERRUPT TUNING ---
-                # Check if scaling WOULD happen with current threshold
                 draft_scale_decision = False
                 
                 # Draft Scale Down Check
@@ -355,9 +360,8 @@ async def autoscaler_task():
                       (total_load / (len(active_servers_for_metrics)+1)) > current_down_threshold):
                     draft_scale_decision = True
                 
-                # If we are about to scale AND we are still tuning AND we have data...
                 if draft_scale_decision and not tuning_event_completed and ttft_window:
-                     if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS: # Only matters if we can actually scale
+                     if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                         window_duration = ttft_window[-1][0] - ttft_window[0][0]
                         if window_duration >= MIN_WINDOW_DURATION_FOR_DECISION:
                             all_values = [v for t, v in ttft_window]
@@ -368,11 +372,15 @@ async def autoscaler_task():
                             if violation_ratio > MAX_SLO_VIOLATION_RATIO: pre_adj = -THRESHOLD_STEP_SIZE 
                             elif violation_ratio < SAFE_SLO_VIOLATION_RATIO: pre_adj = THRESHOLD_STEP_SIZE
                             
-                            if pre_adj != 0:
+                            # SKIP LOGIC
+                            if skip_initial_adjustment:
+                                print(f"\n✋ Skipping pre-emptive adjustment (Startup Stabilization).")
+                                skip_initial_adjustment = False
+                            elif pre_adj != 0:
                                 old_thresh = current_up_threshold
                                 current_up_threshold = max(MIN_UP_THRESHOLD, min(MAX_UP_THRESHOLD, current_up_threshold + pre_adj))
                                 current_down_threshold = current_up_threshold * DOWN_THRESHOLD_RATIO
-                                tuning_event_completed = True # We used our shot!
+                                tuning_event_completed = True 
                                 print(f"\n⚡ PRE-EMPTIVE TUNING INTERRUPT! (Load triggered)")
                                 print(f"   Load: {smoothed_avg_load:.1f} vs Old Thresh: {old_thresh:.1f}")
                                 print(f"   Violation: {violation_ratio*100:.1f}% -> New Thresh: {current_up_threshold:.1f}")
@@ -382,7 +390,7 @@ async def autoscaler_task():
                                 except: pass
 
 
-                # --- D. FINAL SCALING DECISION (Uses updated threshold) ---
+                # --- D. FINAL SCALING DECISION ---
                 if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                     did_scale_up = False
                     did_scale_down = False
