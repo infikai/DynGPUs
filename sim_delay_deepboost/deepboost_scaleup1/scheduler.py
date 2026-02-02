@@ -484,7 +484,7 @@ class Scheduler:
 
             if self.clock.current_time >= next_scaling_check:
                 self._try_scale_up_training_jobs()
-                next_scaling_check = self.clock.current_time + 1
+                next_scaling_check = self.clock.current_time + 2
 
             self._process_scaling_events()
 
