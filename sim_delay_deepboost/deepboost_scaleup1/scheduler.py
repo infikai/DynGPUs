@@ -328,10 +328,10 @@ class Scheduler:
                     continue
 
                 current_count = len(job.assigned_gpus)
-                desired = job.gpus_needed 
+                desired = job.gpus_needed
                 
                 if current_count < desired:
-                    needed = desired - current_count
+                    needed = 1
                     newly_acquired = []
 
                     for gpu in self.cluster.training_gpus:
