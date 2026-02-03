@@ -17,8 +17,8 @@ LLM_TPOT = 0.1               # Time per output token
 
 # DeepBoot Overhead Constants
 OVERHEAD_COLD_START = 2.5       # Time to load model on FREE GPU
-OVERHEAD_WARM_START = 0.01      # Time to start on PROTECT/RUN GPU
-OVERHEAD_RECLAIM = 15.0         # Time to context switch a LOANED GPU
+OVERHEAD_WARM_START = 0      # Time to start on PROTECT/RUN GPU
+OVERHEAD_RECLAIM = 25.0         # Time to context switch a LOANED GPU
 OVERHEAD_AFE_SYNC = 6.0         # Time for training job to sync after shrink
 
 # DeepBoot Protection Time Formula
