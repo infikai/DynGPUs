@@ -13,6 +13,8 @@ class Scheduler:
         self.completed_jobs = []
         self.cluster = cluster_manager
         self.clock = SimulationClock(tick_duration=tick_duration)
+        self.preemption_count = 0
+        self.reclamation_count = 0
 
         self.pending_scaling_events = []
 
@@ -130,6 +132,7 @@ class Scheduler:
                 
                 gpu = self.cluster.find_reclaim_target()
                 
+                
                 if gpu:
                     # 1. Preempt Training Job
                     if gpu.running_tasks:
@@ -138,6 +141,7 @@ class Scheduler:
 
                     # 2. Start Physical Reclaim Timer
                     gpu.start_reclaim()
+                    self.preemption_count += 1
 
                     # 3. Assign the Leader Job
                     # Wait for reclaim (Delay) + Warm Start Overhead
@@ -392,6 +396,7 @@ class Scheduler:
                     gpu.assign_task(job)
                 
                 job.overhead_remaining += OVERHEAD_AFE_SYNC
+                self.reclamation_count += 1
                 self.pending_scaling_events.remove(event)
 
     def _handle_job_completion(self, job):
@@ -537,3 +542,5 @@ class Scheduler:
         self.inference_delay_log_file.close()
         self.usage_log_file.close()
         print("Simulation Complete. Results saved.")
+        print(f"Total Preemptions: {self.preemption_count}")
+        print(f"Total Successful Reclamations: {self.reclamation_count}")

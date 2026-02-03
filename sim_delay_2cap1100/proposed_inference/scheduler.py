@@ -343,8 +343,8 @@ class Scheduler:
                 f"Detailed logs saved to 'training_job_log.csv', 'inference_delay_log.csv', and 'gpu_usage_log.csv'",
                 f"Total Jobs Completed: {total_jobs}",
                 # --- (REMOVED preemption/reclamation lines) ---
-                # f"Total Preemptions: {self.preemption_count}",
-                # f"Total Successful Reclamations: {self.reclamation_count}",
+                f"Total Preemptions: {self.preemption_count}",
+                f"Total Successful Reclamations: {self.reclamation_count}",
                 f"Average Training Job Turnaround: {avg_training_turnaround:.2f} seconds",
                 f"Average Inference Job Turnaround: {avg_inference_turnaround:.2f} seconds",
                 # --- (NEW: Report average delays) ---
