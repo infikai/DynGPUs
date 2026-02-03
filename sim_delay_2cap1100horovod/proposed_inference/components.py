@@ -171,7 +171,7 @@ class Job:
         if self.assigned_gpus:
             self._distribute_load()
 
-        self.paused_until = current_time + PREEMPTION_OVERHEAD
+        self.paused_until = current_time + PREEMPTION_OVERHEAD -2
         
     def reclaim_gpu(self, gpu_to_add, current_time):
         if gpu_to_add in self.assigned_gpus: return
@@ -181,7 +181,7 @@ class Job:
 
         self.assigned_gpus.append(gpu_to_add)
         self._distribute_load()
-        self.paused_until = current_time + RECLAMATION_OVERHEAD
+        self.paused_until = current_time + RECLAMATION_OVERHEAD -4
     
     def update_progress(self, time_delta, current_time):
         if not self.assigned_gpus or current_time < self.paused_until:
