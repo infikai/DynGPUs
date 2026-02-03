@@ -27,7 +27,7 @@ BENCHMARK_STAGES = {
     "Stage 11": 0.9,
     "Stage 12": 0.8,
     "Stage 13": 0.4,
-    "Stage 14": 0.2,
+    "Stage 14": 0.8,
     "Stage 15": 0.5,
     "Stage 16": 0.4,
     "Stage 17": 0.9,
@@ -39,7 +39,17 @@ BENCHMARK_STAGES = {
     "Stage 23": 0.9,
     "Stage 24": 0.5,
     "Stage 25": 0.8,
-    "Stage 26": 0.4
+    "Stage 26": 0.4,
+    "Stage 27": 0.9,
+    "Stage 28": 0.4,
+    "Stage 29": 0.8,
+    "Stage 30": 0.3,
+    "Stage 31": 0.8,
+    "Stage 32": 0.4,
+    "Stage 33": 0.9,
+    "Stage 34": 0.5,
+    "Stage 35": 0.8,
+    "Stage 36": 0.4
 }
 REQUEST_READ_TIMEOUT_SECONDS = 600
 
