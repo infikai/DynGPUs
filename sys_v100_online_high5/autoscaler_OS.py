@@ -53,7 +53,7 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 
 # --- 🖥️ Server State Management ---
 ALL_SERVERS = [
-    {"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
+    #{"host": "localhost", "port": 8000, "status": "sleeping", "rank": 0, "shared": True},
     {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
     {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True}, 
 ]
