@@ -1,0 +1,260 @@
+import asyncio
+import subprocess
+import httpx
+import time
+import numpy as np
+import asyncssh
+from typing import List, Dict, Tuple
+from collections import deque
+
+# --- ⚙️ Configuration ---
+HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg" 
+HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template"
+SERVER_COUNT_LOG_FILE = "./active_servers.log"
+ACTIVE_WORKERS_FILE = "./active_workers.txt"
+TTFT_LOG_FILE = "./ttft_adaptive_window.log"
+
+# ---  SLO & Adaptive Logic Configuration ---
+TTFT_SLO_TARGET_SECONDS = 6.9
+
+# --- ONE-SHOT TUNING CONFIGURATION ---
+TUNING_MODE_DURATION_SECONDS = 100
+ADAPTIVE_WINDOW_SECONDS = 100      
+
+# Minimum data required to allow a pre-emptive adjustment
+MIN_WINDOW_DURATION_FOR_DECISION = 15 
+
+# Percentile Targets
+MAX_SLO_VIOLATION_RATIO = 0.05
+SEVERE_SLO_VIOLATION_RATIO = 0.30 
+SAFE_SLO_VIOLATION_RATIO = 0.05
+
+# Threshold tuning
+INITIAL_UP_THRESHOLD = 26.0
+MIN_UP_THRESHOLD = 3.0
+MAX_UP_THRESHOLD = 50.0
+THRESHOLD_STEP_SIZE = 1       
+DOWN_THRESHOLD_RATIO = 0.5
+
+# Standard Autoscaling Rules
+MIN_ACTIVE_SERVERS = 1
+SCALING_COOLDOWN_SECONDS = 20
+
+# ---  INTERVAL CONFIGURATION ---
+TTFT_MONITOR_INTERVAL_SECONDS = 0.5
+LOAD_MONITOR_INTERVAL_SECONDS = 3.0
+LOAD_HISTORY_SIZE = 10
+
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 180
+GPU_MEMORY_FREE_THRESHOLD_MB = 3000
+GPU_FREE_TIMEOUT_SECONDS = 15
+GPU_FREE_POLL_INTERVAL_SECONDS = 1
+# -------------------------------------
+
+
+# ---  Server State Management ---
+ALL_SERVERS = [
+    {"host": "localhost", "port": 8001, "status": "sleeping", "rank": 1, "shared": True},
+    {"host": "localhost", "port": 8002, "status": "active", "rank": 2, "shared": True}, 
+]
+
+# --- Helper Functions (Truncated for brevity, logic remains same) ---
+
+def read_active_workers() -> List[int]:
+    try:
+        with open(ACTIVE_WORKERS_FILE, "r") as f:
+            content = f.read().strip()
+            return [int(rank) for rank in content.split(',')] if content else []
+    except FileNotFoundError: return []
+
+def write_active_workers(ranks: List[int]):
+    ranks.sort()
+    content = ",".join(map(str, ranks))
+    with open(ACTIVE_WORKERS_FILE, "w") as f: f.write(content)
+
+async def check_gpu_memory_is_free(server: Dict) -> bool:
+    if not server.get("shared"): return True
+    local_gpu_id = server['rank'] % 4 + 1
+    command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id}"
+    start_time = time.time()
+    while (time.time() - start_time) < GPU_FREE_TIMEOUT_SECONDS:
+        try:
+            async with asyncssh.connect(server['host']) as conn:
+                result = await conn.run(command, check=True)
+                if int(result.stdout.strip()) < GPU_MEMORY_FREE_THRESHOLD_MB: return True
+            await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
+        except Exception: await asyncio.sleep(GPU_FREE_POLL_INTERVAL_SECONDS)
+    return False
+
+async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
+    url = f"http://{server['host']}:{server['port']}/metrics"
+    metrics = {"running": 0.0, "waiting": 0.0, "ttft_sum": 0.0, "ttft_count": 0.0, "prompt_tokens": 0.0}
+    try:
+        response = await client.get(url, timeout=5)
+        for line in response.text.split('\n'):
+            if line.startswith("vllm:num_requests_running"): metrics["running"] = float(line.rsplit(' ', 1)[1])
+            elif line.startswith("vllm:num_requests_waiting"): metrics["waiting"] = float(line.rsplit(' ', 1)[1])
+            elif line.startswith("vllm:time_to_first_token_seconds_sum"): metrics["ttft_sum"] = float(line.rsplit(' ', 1)[1])
+            elif line.startswith("vllm:time_to_first_token_seconds_count"): metrics["ttft_count"] = float(line.rsplit(' ', 1)[1])
+    except Exception: pass
+    return metrics
+
+async def update_haproxy_config(active_servers: List[Dict]) -> bool:
+    server_lines = [f"    server web{i:02d} {s['host']}:{s['port']}\n" for i, s in enumerate(active_servers, start=1)]
+    upstream_config = "".join(server_lines)
+    try:
+        with open(HAPROROXY_TEMPLATE_PATH, "r") as f: template = f.read()
+        with open(HAPROXY_CONF_PATH, "w") as f: f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
+        return True
+    except Exception: return False
+
+def reload_haproxy():
+    try: subprocess.run(["sudo", "systemctl", "reload", "haproxy"], check=True)
+    except Exception: pass
+
+async def set_server_sleep_state(server: Dict, sleep: bool):
+    url = f"http://{server['host']}:{server['port']}/sleep?level=1" if sleep else f"http://{server['host']}:{server['port']}/wake_up"
+    try:
+        async with httpx.AsyncClient() as client: await client.post(url, timeout=20)
+    except Exception: pass
+
+# --- Scaling Actions ---
+
+async def scale_down(count: int) -> bool:
+    active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+    shared_active_servers = [s for s in active_servers if s['shared']]
+    max_possible = len(active_servers) - MIN_ACTIVE_SERVERS
+    actual_count = min(count, len(shared_active_servers), max_possible)
+    if actual_count <= 0: return False
+    servers_to_scale_down = shared_active_servers[:actual_count]
+    for server in servers_to_scale_down: server['status'] = 'sleeping'
+    if not await update_haproxy_config([s for s in ALL_SERVERS if s['status'] == 'active']):
+        for server in servers_to_scale_down: server['status'] = 'active'
+        return False
+    reload_haproxy()
+    async with httpx.AsyncClient() as client:
+        async def wait_and_sleep(s):
+            start = time.time()
+            while (time.time() - start) < GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
+                metrics = await get_server_metrics(s, client)
+                if metrics.get("running", -1) == 0: break
+                await asyncio.sleep(2)
+            await set_server_sleep_state(s, sleep=True)
+        await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
+    write_active_workers(list(set(read_active_workers() + [s['rank'] for s in servers_to_scale_down])))
+    return True
+
+async def scale_up(count: int) -> bool:
+    all_sleeping = [s for s in ALL_SERVERS if s['status'] == 'sleeping']
+    candidates = [s for s in all_sleeping if not s['shared']] + sorted([s for s in all_sleeping if s['shared']], key=lambda s: s['rank'], reverse=True)
+    actual_count = min(count, len(candidates))
+    if actual_count <= 0: return False
+    servers_to_wake = candidates[:actual_count]
+    shared_to_wake = [s for s in servers_to_wake if s['shared']]
+    if shared_to_wake:
+        orig_ranks = read_active_workers()
+        ranks_to_rm = [s['rank'] for s in shared_to_wake]
+        write_active_workers([r for r in orig_ranks if r not in ranks_to_rm])
+        if not all(await asyncio.gather(*[check_gpu_memory_is_free(s) for s in shared_to_wake])):
+            write_active_workers(orig_ranks)
+            return False
+    for server in servers_to_wake:
+        await set_server_sleep_state(server, sleep=False)
+        server['status'] = 'active'
+    if await update_haproxy_config([s for s in ALL_SERVERS if s['status'] == 'active']):
+        reload_haproxy()
+        return True
+    return False
+
+# --- MAIN AUTOSCALER TASK ---
+
+async def autoscaler_task():
+    print(f"🚀 Aggressive Autoscaler started...")
+    last_scaling_time = time.time()
+    last_load_check_time = 0
+    tuning_event_completed = False 
+    skip_initial_adjustment = True
+    load_history = []
+    current_up_threshold = INITIAL_UP_THRESHOLD
+    current_down_threshold = current_up_threshold * DOWN_THRESHOLD_RATIO
+    ttft_window: deque[Tuple[float, float]] = deque()
+    previous_server_metrics = {}
+
+    async with httpx.AsyncClient() as client:
+        while True:
+            await asyncio.sleep(TTFT_MONITOR_INTERVAL_SECONDS)
+            current_time = time.time()
+            active_servers_for_metrics = [s for s in ALL_SERVERS if s['status'] == 'active']
+            if not active_servers_for_metrics: continue 
+
+            metric_results = await asyncio.gather(*[get_server_metrics(s, client) for s in active_servers_for_metrics])
+            for server, current_m in zip(active_servers_for_metrics, metric_results):
+                srv_key = f"{server['host']}:{server['port']}"
+                prev_m = previous_server_metrics.get(srv_key, {'ttft_sum': 0, 'ttft_count': 0})
+                delta_count = current_m['ttft_count'] - prev_m['ttft_count']
+                if delta_count > 0:
+                    ttft_window.append((current_time, (current_m['ttft_sum'] - prev_m['ttft_sum']) / delta_count))
+                previous_server_metrics[srv_key] = {'ttft_sum': current_m['ttft_sum'], 'ttft_count': current_m['ttft_count']}
+
+            while ttft_window and (current_time - ttft_window[0][0]) > ADAPTIVE_WINDOW_SECONDS: ttft_window.popleft()
+
+            if (current_time - last_load_check_time) >= LOAD_MONITOR_INTERVAL_SECONDS:
+                last_load_check_time = current_time
+                time_since_scale = current_time - last_scaling_time
+
+                # --- A/C. ADAPTIVE LOGIC (Shared logic for Timer and Pre-empt) ---
+                if (time_since_scale >= TUNING_MODE_DURATION_SECONDS or "PreEmptCondition") and not tuning_event_completed:
+                    if ttft_window and (ttft_window[-1][0] - ttft_window[0][0]) >= MIN_WINDOW_DURATION_FOR_DECISION:
+                        all_values = [v for t, v in ttft_window]
+                        violation_ratio = sum(1 for v in all_values if v > TTFT_SLO_TARGET_SECONDS) / len(all_values)
+                        
+                        # Calculate Aggressive Adjustment
+                        adjustment = 0.0
+                        if violation_ratio > SEVERE_SLO_VIOLATION_RATIO:
+                            adjustment = -2 * THRESHOLD_STEP_SIZE 
+                        elif violation_ratio > MAX_SLO_VIOLATION_RATIO:
+                            adjustment = -THRESHOLD_STEP_SIZE
+                        elif violation_ratio < SAFE_SLO_VIOLATION_RATIO:
+                            adjustment = THRESHOLD_STEP_SIZE
+
+                        if skip_initial_adjustment:
+                            skip_initial_adjustment = False
+                        elif adjustment != 0:
+                            current_up_threshold = max(MIN_UP_THRESHOLD, min(MAX_UP_THRESHOLD, current_up_threshold + adjustment))
+                            current_down_threshold = current_up_threshold * DOWN_THRESHOLD_RATIO
+                            tuning_event_completed = True
+                            print(f"\n🎯 TUNING: Violation {violation_ratio*100:.1f}% -> Thresh: {current_up_threshold} (Adj: {adjustment})")
+
+                # --- LOAD CALCULATIONS ---
+                total_load = sum(r['running'] + r['waiting'] for r in metric_results)
+                instantaneous_avg_load = total_load / len(active_servers_for_metrics)
+                load_history.append(instantaneous_avg_load)
+                if len(load_history) > LOAD_HISTORY_SIZE: load_history.pop(0)
+                smoothed_avg_load = np.mean(load_history)
+
+                # --- FINAL SCALING DECISION ---
+                if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
+                    if (smoothed_avg_load < current_down_threshold and 
+                        (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < current_up_threshold):
+                        if await scale_down(count=1):
+                            last_scaling_time = time.time()
+                            tuning_event_completed = True # Lock tuning on scale down
+                    
+                    elif smoothed_avg_load > current_up_threshold:
+                        if await scale_up(count=1):
+                            print("🔄 Scaling UP! Resetting Tuning.")
+                            ttft_window.clear()
+                            last_scaling_time = time.time()
+                            tuning_event_completed = False 
+
+                print(f"[{time.strftime('%H:%M:%S')}] LOAD:{smoothed_avg_load:.1f} | THRESH:{current_up_threshold:.1f} | LOCKED:{tuning_event_completed}")
+
+async def startup_tasks():
+    initial_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+    if await update_haproxy_config(initial_active_servers): reload_haproxy()
+    loop = asyncio.get_event_loop()
+    loop.create_task(autoscaler_task())
+    await asyncio.Future() 
+
+if __name__ == "__main__":
+    asyncio.run(startup_tasks())
