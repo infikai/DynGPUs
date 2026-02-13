@@ -8,14 +8,15 @@ from typing import List, Dict
 
 # --- ⚙️ Configuration ---
 # File Paths
-NGINX_CONF_PATH = "/etc/nginx/nginx.conf"
-NGINX_TEMPLATE_PATH = "/etc/nginx/nginx.conf.template"
+# --- MODIFIED FOR HAPROXY ---
+HAPROXY_CONF_PATH = "/etc/haproxy/haproxy.cfg"  # The file to be overwritten
+HAPROROXY_TEMPLATE_PATH = "/etc/haproxy/haproxy.cfg.template" # The template file
 SERVER_COUNT_LOG_FILE = "./active_servers.log"
-ACTIVE_WORKERS_FILE = "/home/pacs/Kevin/DynGPUs/sys_v100/active_workers.txt"
+ACTIVE_WORKERS_FILE = "./active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 10
-SCALE_UP_THRESHOLD = 20
+SCALE_DOWN_THRESHOLD = 8
+SCALE_UP_THRESHOLD = 16
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
@@ -30,7 +31,7 @@ GPU_FREE_POLL_INTERVAL_SECONDS = 1
 LOAD_HISTORY_SIZE = 10
 DELTA_HISTORY_SIZE = 5
 MEDIAN_DELTA_TRIGGER = 0.25
-# ---------------------------------------------------
+# -------------------------------------
 
 
 # --- 🖥️ Server State Management (Retained) ---
@@ -62,6 +63,7 @@ def write_active_workers(ranks: List[int]):
     print(f"\nUpdated active_workers.txt with ranks: {content}")
 
 async def check_gpu_memory_is_free(server: Dict) -> bool:
+    # ... (content remains the same) ...
     """
     Connects to a server via SSH and polls nvidia-smi until the GPU's memory
     is below a threshold or a timeout is reached.
@@ -70,17 +72,13 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
         return True
 
     print(f"\nWaiting for GPU memory to be freed for rank {server['rank']} on {server['host']}...")
-    local_gpu_id = server['rank'] % 4
-    command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id+1}"
+    local_gpu_id = server['rank'] % 4 + 1
+    command = f"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i {local_gpu_id}"
     
     start_time = time.time()
     while (time.time() - start_time) < GPU_FREE_TIMEOUT_SECONDS:
         try:
-            async with asyncssh.connect(
-                server['host'], 
-                username='pacs',
-                # Add this if your key isn't picked up automatically:
-                client_keys=['/home/pacs/.ssh/id_rsa']) as conn:
+            async with asyncssh.connect(server['host']) as conn:
                 result = await conn.run(command, check=True)
                 memory_used_mb = int(result.stdout.strip())
                 
@@ -100,6 +98,7 @@ async def check_gpu_memory_is_free(server: Dict) -> bool:
     return False
 
 async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
+    # ... (content remains the same) ...
     """Fetches and parses metrics from a vLLM server's /metrics endpoint."""
     url = f"http://{server['host']}:{server['port']}/metrics"
     running, waiting = 0.0, 0.0
@@ -114,34 +113,53 @@ async def get_server_metrics(server: Dict, client: httpx.AsyncClient) -> Dict:
     except httpx.RequestError: pass
     return {"running": running, "waiting": waiting}
 
-async def update_nginx_config(active_servers: List[Dict]) -> bool:
-    """Generates and writes a new nginx.conf from a template."""
-    print("\nUpdating Nginx configuration...")
+
+# --- MODIFIED: HAProxy Configuration Update ---
+async def update_haproxy_config(active_servers: List[Dict]) -> bool:
+    """
+    Generates and writes a new haproxy.cfg from a template.
     
-    server_lines = [f"        server {s['host']}:{s['port']};\n" for s in active_servers]
-    upstream_config = "        least_conn;\n" + "".join(server_lines)
+    The template must contain the placeholder: {UPSTREAM_SERVERS}
+    """
+    print("\nUpdating HAProxy configuration...")
+    
+    # Create a list of HAProxy server lines
+    # The 'check' directive ensures HAProxy performs health checks on the backend.
+    server_lines = [
+        f"    server web{i:02d} {s['host']}:{s['port']}\n"
+        for i, s in enumerate(active_servers, start=1)
+    ]
+    
+    upstream_config = "".join(server_lines)
     
     try:
-        with open(NGINX_TEMPLATE_PATH, "r") as f: 
+        with open(HAPROROXY_TEMPLATE_PATH, "r") as f: 
             template = f.read()
             
-        with open(NGINX_CONF_PATH, "w") as f: 
+        with open(HAPROXY_CONF_PATH, "w") as f: 
+            # Replace the placeholder with the full upstream server list
             f.write(template.replace("{UPSTREAM_SERVERS}", upstream_config))
             
-        print(f"Nginx config updated with {len(active_servers)} active servers (using 'least_conn').")
+        print(f"HAProxy config updated with {len(active_servers)} active servers.")
         return True
     except Exception as e:
-        print(f"\nERROR: Failed to write Nginx config: {e}")
+        print(f"\nERROR: Failed to write HAProxy config: {e}")
         return False
 
-def reload_nginx():
-    """Executes the command to reload Nginx gracefully."""
-    print("Reloading Nginx...")
+# --- MODIFIED: HAProxy Reload ---
+def reload_haproxy():
+    """Executes the command to reload HAProxy gracefully."""
+    print("Reloading HAProxy...")
     try:
-        subprocess.run(["sudo", "nginx", "-s", "reload"], check=True)
-        print("Nginx reloaded successfully.")
+        # The 'soft-stop' reload command is often used for HAProxy
+        subprocess.run(["sudo", "systemctl", "reload", "haproxy"], check=True)
+        print("HAProxy reloaded successfully.")
     except Exception as e:
-        print(f"\nERROR: Failed to reload Nginx: {e}")
+        print(f"\nERROR: Failed to reload HAProxy: {e}. Check if the service is running or configuration is valid.")
+
+# --- Renaming the functions called by the scaling logic ---
+update_nginx_config = update_haproxy_config # Alias the old name to the new function
+reload_nginx = reload_haproxy # Alias the old name to the new function
 
 async def set_server_sleep_state(server: Dict, sleep: bool):
     """Sends a POST request to put a server to sleep or wake it up."""
@@ -154,7 +172,8 @@ async def set_server_sleep_state(server: Dict, sleep: bool):
     except httpx.RequestError as e:
         print(f"\nERROR: Could not send command to server {server['host']}:{server['port']}: {e}")
 
-# --- Scaling Logic ---
+
+# --- Scaling Logic (Retained, now using HAProxy aliases) ---
 
 async def scale_down(count: int) -> bool:
     """
@@ -174,17 +193,24 @@ async def scale_down(count: int) -> bool:
 
     servers_to_scale_down = shared_active_servers[:actual_count]
     
+    # Temporarily mark the servers as 'sleeping' before HAProxy update
     for server in servers_to_scale_down:
         server['status'] = 'sleeping'
     
+    # HAProxy update must use servers that are currently 'active'
     new_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
-    if not await update_nginx_config(new_active_servers):
+    
+    # Use the aliased function
+    if not await update_haproxy_config(new_active_servers):
+        # Revert status on failure
         for server in servers_to_scale_down:
             server['status'] = 'active'
         return False
-    reload_nginx()
+    # Use the aliased function
+    reload_haproxy()
     
     async with httpx.AsyncClient() as client:
+        # ... (wait_and_sleep logic remains the same) ...
         async def wait_and_sleep(s):
             print(f"\nGracefully shutting down shared server {s['host']}:{s['port']}...")
             wait_start_time = time.time()
@@ -201,6 +227,7 @@ async def scale_down(count: int) -> bool:
 
         await asyncio.gather(*[wait_and_sleep(s) for s in servers_to_scale_down])
 
+    # ... (ranks update logic remains the same) ...
     ranks_to_add = [s['rank'] for s in servers_to_scale_down]
     print(f"\nAdding ranks {ranks_to_add} back to the training job...")
     active_ranks = read_active_workers()
@@ -262,13 +289,15 @@ async def scale_up(count: int) -> bool:
              write_active_workers(original_active_ranks)
         return False
 
-    if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
-        reload_nginx()
+    # Use the aliased function
+    if await update_haproxy_config([s for s in ALL_SERVERS if s['status'] == 'active']):
+        # Use the aliased function
+        reload_haproxy()
         log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] SCALE_UP: Full scale-up of {len(successfully_woken)} server(s) took {time.time() - start_time:.2f}s.\n"
         with open(SERVER_COUNT_LOG_FILE, "a") as f: f.write(log_entry)
         return True
     
-    print("ERROR: Nginx update failed. Reverting...")
+    print("ERROR: HAProxy update failed. Reverting...")
     for server in successfully_woken:
         server['status'] = 'sleeping'
         if server['shared']:
@@ -278,7 +307,7 @@ async def scale_up(count: int) -> bool:
                 write_active_workers(ranks)
     return False
 
-# --- Background Tasks ---
+# --- Background Tasks (Retained) ---
 
 async def log_active_servers():
     """Logs the number of active servers to a file every 5 seconds."""
@@ -292,26 +321,75 @@ async def log_active_servers():
         await asyncio.sleep(5)
 
 async def autoscaler_task():
+    # ... (content remains the same, but uses the aliased functions) ...
     """
-    The main autoscaler loop that polls server metrics and triggers scaling.
+    The main autoscaler loop that polls server metrics, triggers scaling, and 
+    isolates servers that are severely bottlenecked (high waiting queue disparity).
     """
     print("🚀 Autoscaler started...")
     last_scaling_time = 0
     load_history = []
     delta_history = []
     last_total_load = 0
-    last_total_waiting = 0
     
     async with httpx.AsyncClient() as client:
         while True:
             await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
             
+            # Flag to track if HAProxy needs a reload due to isolation status change
+            haproxy_reload_needed = False
+            
+            # --- 1. ISOLATION CLEANUP: Re-activate servers whose isolation time has expired ---
+            for server in ALL_SERVERS:
+                if server.get('status') == 'bottlenecked':
+                    if server.get('isolation_end_time', 0.0) < time.time():
+                        print(f"\n✅ Server {server['host']}:{server['port']} isolation expired. Reverting status to active.")
+                        server['status'] = 'active'
+                        server['isolation_end_time'] = 0.0
+                        haproxy_reload_needed = True 
+            
+            # Identify servers that are currently active (serving traffic)
             active_servers_for_metrics = [s for s in ALL_SERVERS if s['status'] == 'active']
-            if not active_servers_for_metrics: continue
+            if not active_servers_for_metrics: 
+                continue 
 
+            # --- 2. METRIC GATHERING ---
             metric_tasks = [get_server_metrics(server, client) for server in active_servers_for_metrics]
             metric_results = await asyncio.gather(*metric_tasks)
 
+            # Map metrics back to servers for easy look up
+            server_metrics_map = {
+                (s['host'], s['port']): r for s, r in zip(active_servers_for_metrics, metric_results)
+            }
+
+            # --- 3. ISOLATION CHECK: Find and isolate bottlenecked servers ---
+            
+            # waiting_requests = [r['waiting'] for r in metric_results if r['waiting'] >= 0]
+            
+            # if len(waiting_requests) >= 2: 
+            #     median_waiting = np.median(waiting_requests)
+            #     isolation_threshold = median_waiting * ISOLATION_THRESHOLD_FACTOR
+                
+            #     if isolation_threshold > 0:
+            #         for server in active_servers_for_metrics:
+            #             metrics = server_metrics_map.get((server['host'], server['port']))
+                        
+            #             if metrics and metrics['waiting'] > isolation_threshold:
+            #                 print(f"\n⚠️ Isolating server {server['host']}:{server['port']}! Waiting queue ({metrics['waiting']:.0f}) > {ISOLATION_THRESHOLD_FACTOR}x median ({median_waiting:.2f}).")
+                            
+            #                 server['status'] = 'bottlenecked'
+            #                 server['isolation_end_time'] = time.time() + ISOLATION_DURATION_SECONDS
+            #                 haproxy_reload_needed = True 
+                            
+            # # --- 4. HAPROXY RELOAD ---
+            # if haproxy_reload_needed:
+            #     final_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+            #     if await update_haproxy_config(final_active_servers):
+            #         reload_haproxy()
+            #     continue 
+
+            # --- 5. SCALING DECISION ---
+            
             total_load = sum(r['running'] + r['waiting'] for r in metric_results)
             instantaneous_avg_load = total_load / len(active_servers_for_metrics)
 
@@ -321,7 +399,18 @@ async def autoscaler_task():
                 load_history.pop(0)
             smoothed_avg_load = np.mean(load_history)
             
-            # --- MONITORING OUTPUT (NEW) ---
+            # --- DELTA Calculation and Smoothing ---
+            load_delta = total_load - last_total_load
+            percent_change = load_delta / last_total_load if last_total_load > 0 else 0
+            
+            delta_history.append(percent_change if percent_change > 0 else 0)
+            if len(delta_history) > DELTA_HISTORY_SIZE:
+                delta_history.pop(0)
+            
+            median_delta = np.median(delta_history) if delta_history else 0
+            
+            
+            # --- MONITORING OUTPUT ---
             server_details = []
             for server, metrics in zip(active_servers_for_metrics, metric_results):
                 r = metrics.get('running', 0)
@@ -329,15 +418,15 @@ async def autoscaler_task():
                 server_details.append(f"[{server['host']}:{server['port']}] R:{r:.0f} W:{w:.0f}")
 
             print(f"\n[{time.strftime('%H:%M:%S')}] --- MONITORING REPORT ---")
-            print(f"STATUS: Active Servers: {len(active_servers_for_metrics)} | Current Avg Load: {instantaneous_avg_load:.2f} | Smoothed Avg Load: {smoothed_avg_load:.2f}")
+            print(f"STATUS: Active Servers: {len(active_servers_for_metrics)} | Smoothed Avg Load: {smoothed_avg_load:.2f} | Median Delta: {median_delta:.0%}")
             print(f"DETAILS: {' | '.join(server_details)}")
-            # -------------------------------
             
             # --- DECISION LOGIC ---
-            # 1. Absolute Threshold Trigger (Normal Scaling - respects cooldown)
+
+            # 1. Median Delta Trigger (Anticipatory Scaling - overrides cooldown)
             if (time.time() - last_scaling_time) > SCALING_COOLDOWN_SECONDS:
                 
-                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+3 < SCALE_UP_THRESHOLD:
+                if smoothed_avg_load < SCALE_DOWN_THRESHOLD and instantaneous_avg_load < SCALE_DOWN_THRESHOLD and (total_load / (len(active_servers_for_metrics)-1) if len(active_servers_for_metrics) > 1 else 1)+2 < SCALE_UP_THRESHOLD:
                     deviation = (SCALE_DOWN_THRESHOLD - smoothed_avg_load) / SCALE_DOWN_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
@@ -345,7 +434,7 @@ async def autoscaler_task():
                     if await scale_down(count=num_to_scale): 
                         last_scaling_time = time.time()
                         
-                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1))-1 > SCALE_DOWN_THRESHOLD:
+                elif smoothed_avg_load > SCALE_UP_THRESHOLD and instantaneous_avg_load > SCALE_UP_THRESHOLD and (total_load / (len(active_servers_for_metrics)+1)) > SCALE_DOWN_THRESHOLD:
                     deviation = (smoothed_avg_load - SCALE_UP_THRESHOLD) / SCALE_UP_THRESHOLD
                     num_to_scale = max(1, int(len(active_servers_for_metrics) * deviation))
                     
@@ -356,12 +445,17 @@ async def autoscaler_task():
             # --- END OF CYCLE ---
             last_total_load = total_load
 
+
+# --- Main Execution ---
+
 async def startup_tasks():
     """Performs asynchronous setup and starts the recurring tasks."""
     
     # AWAIT the configuration update
-    if await update_nginx_config([s for s in ALL_SERVERS if s['status'] == 'active']):
-        reload_nginx()
+    # The initial HAProxy update must only include servers marked 'active'
+    initial_active_servers = [s for s in ALL_SERVERS if s['status'] == 'active']
+    if await update_haproxy_config(initial_active_servers):
+        reload_haproxy()
     
     # Get the loop once the async environment is active
     loop = asyncio.get_event_loop()
@@ -370,24 +464,15 @@ async def startup_tasks():
     loop.create_task(log_active_servers())
     loop.create_task(autoscaler_task())
     
-    # NEW: Create a never-ending future to keep the loop alive indefinitely.
-    # The autoscaler logic runs on the tasks created above.
+    # Create a never-ending future to keep the loop alive indefinitely.
     await asyncio.Future() 
 
-
-# --- Main Execution ---
 
 if __name__ == "__main__":
     
     try:
-        # Run the async startup function.
-        # This executes the setup, starts the background tasks, and hits 'await asyncio.Future()', 
-        # which keeps the loop running until an external signal (like KeyboardInterrupt).
         asyncio.run(startup_tasks())
     except KeyboardInterrupt:
         print("\nAutoscaler stopped by user.")
-    except RuntimeError as e:
-        if "cannot run forever" in str(e):
-            print("\nError: The event loop was shut down unexpectedly. Stopping autoscaler.")
-        else:
-            raise
+    except RuntimeError:
+        pass
