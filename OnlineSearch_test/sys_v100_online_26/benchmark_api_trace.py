@@ -16,7 +16,7 @@ STAGE_DURATION_SECONDS = 150  # 5 minutes per stage
 BENCHMARK_STAGES = {
     "Stage 1": 0.5,
     "Stage 2": 0.8,
-    "Stage 3": 1,
+    "Stage 3": 0.8,
     "Stage 4": 0.6,
     "Stage 5": 0.4,
     "Stage 6": 0.9,
@@ -33,7 +33,7 @@ BENCHMARK_STAGES = {
     "Stage 17": 0.9,
     "Stage 18": 0.3,
     "Stage 19": 0.8,
-    "Stage 20": 1,
+    "Stage 20": 0.8,
     "Stage 21": 0.6,
     "Stage 22": 0.4,
     "Stage 23": 0.9,
