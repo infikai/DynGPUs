@@ -15,8 +15,8 @@ SERVER_COUNT_LOG_FILE = "./active_servers.log"
 ACTIVE_WORKERS_FILE = "./active_workers.txt"
 
 # Scaling Thresholds (based on average (running + waiting) requests per server)
-SCALE_DOWN_THRESHOLD = 7
-SCALE_UP_THRESHOLD = 14
+SCALE_DOWN_THRESHOLD = 5
+SCALE_UP_THRESHOLD = 10
 
 # Scaling Rules
 MIN_ACTIVE_SERVERS = 1
