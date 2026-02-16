@@ -5,11 +5,8 @@ source ~/Kevin/venv/vllm/bin/activate
 
 # 2. List the folders to process
 FOLDERS=(
-    "/home/pacs/Kevin/DynGPUs/OnlineSearch_test2000/sys_v100_online_26"
-    "/home/pacs/Kevin/DynGPUs/OnlineSearch_test2000/sys_v100_online_24"
-    "/home/pacs/Kevin/DynGPUs/OnlineSearch_test2000/sys_v100_online_22"
-    "/home/pacs/Kevin/DynGPUs/OnlineSearch_test2000/sys_v100_online_20"
-    "/home/pacs/Kevin/DynGPUs/OnlineSearch_test2000/sys_v100_online_18"
+    "/home/pacs/Kevin/DynGPUs/OnlineSearch_test2000/sys_v100_online_25"
+    "/home/pacs/Kevin/DynGPUs/OnlineSearch_test2000/sys_v100_online_23"
 )
 
 for DIR in "${FOLDERS[@]}"; do
